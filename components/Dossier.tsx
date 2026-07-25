@@ -120,6 +120,25 @@ export default function DossierModal({
               </Section>
             )}
 
+            {dossier.links && dossier.links.length > 0 && (
+              <Section title="Публичные профили и точки выхода">
+                <ul className="space-y-1.5">
+                  {dossier.links.map((l, i) => (
+                    <li key={i} className="text-sm">
+                      <a
+                        href={l.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-accent underline underline-offset-2"
+                      >
+                        {l.label || l.url}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            )}
+
             {dossier.red_flags.length > 0 && (
               <Section title="Красные флаги и оговорки">
                 <ul className="space-y-1.5">

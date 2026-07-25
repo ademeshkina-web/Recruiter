@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { BoardCandidate, Dossier, Position, Stage, STAGES } from "@/lib/types";
+import { BoardCandidate, Dossier, OutreachResult, Position, Stage, STAGES } from "@/lib/types";
 import { uid } from "@/lib/store";
 import DossierModal from "@/components/Dossier";
+import OutreachModal from "@/components/Outreach";
 
 export default function Board({
   position,
@@ -23,8 +24,12 @@ export default function Board({
   const [openId, setOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [outId, setOutId] = useState<string | null>(null);
+  const [outLoading, setOutLoading] = useState(false);
+  const [outErr, setOutErr] = useState("");
 
   const openCand = position.candidates.find((c) => c.id === openId) || null;
+  const outCand = position.candidates.find((c) => c.id === outId) || null;
 
   function addManual() {
     if (!name.trim()) return;
@@ -67,6 +72,34 @@ export default function Board({
     if (!c.dossier) runDossier(c);
   }
 
+  async function runOutreach(c: BoardCandidate) {
+    setOutLoading(true);
+    setOutErr("");
+    try {
+      const dossierSummary = c.dossier
+        ? [c.dossier.recommendation, ...c.dossier.findings.map((f) => f.text)].join(" ")
+        : c.note || "";
+      const res = await fetch("/api/outreach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: c.name, role: c.role, context: dossierContext, dossierSummary }),
+      });
+      const d = (await res.json()) as OutreachResult & { error?: string };
+      if (!res.ok) throw new Error(d.error || "Ошибка");
+      onUpdateCandidate(c.id, { outreach: d });
+    } catch (e) {
+      setOutErr(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setOutLoading(false);
+    }
+  }
+
+  function openOutreach(c: BoardCandidate) {
+    setOutErr("");
+    setOutId(c.id);
+    if (!c.outreach) runOutreach(c);
+  }
+
   return (
     <div>
       <ManualAdd name={name} role={role} setName={setName} setRole={setRole} add={addManual} />
@@ -96,6 +129,7 @@ export default function Board({
                       onUpdate={(patch) => onUpdateCandidate(c.id, patch)}
                       onRemove={() => onRemoveCandidate(c.id)}
                       onDossier={() => openDossier(c)}
+                      onOutreach={() => openOutreach(c)}
                     />
                   ))}
                 </div>
@@ -116,6 +150,20 @@ export default function Board({
             setErr("");
           }}
           onRefresh={() => runDossier(openCand)}
+        />
+      )}
+
+      {outId && outCand && (
+        <OutreachModal
+          name={outCand.name}
+          data={(outCand.outreach as (OutreachResult & { demo?: boolean }) | undefined) || null}
+          loading={outLoading}
+          err={outErr}
+          onClose={() => {
+            setOutId(null);
+            setOutErr("");
+          }}
+          onRefresh={() => runOutreach(outCand)}
         />
       )}
     </div>
@@ -164,11 +212,13 @@ function Card({
   onUpdate,
   onRemove,
   onDossier,
+  onOutreach,
 }: {
   c: BoardCandidate;
   onUpdate: (patch: Partial<BoardCandidate>) => void;
   onRemove: () => void;
   onDossier: () => void;
+  onOutreach: () => void;
 }) {
   return (
     <div className="rounded-lg border border-ink/10 bg-white p-3 shadow-sm">
@@ -228,6 +278,16 @@ function Card({
         }`}
       >
         {c.dossier ? "★ Досье собрано — открыть" : "Собрать OSINT-досье"}
+      </button>
+      <button
+        onClick={onOutreach}
+        className={`mt-1.5 w-full rounded-md border px-2 py-1 text-xs transition ${
+          c.outreach
+            ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+            : "border-ink/15 text-ink/60 hover:bg-paper"
+        }`}
+      >
+        {c.outreach ? "✉ Письма готовы — открыть" : "✉ Письма для аутрича"}
       </button>
     </div>
   );

@@ -129,15 +129,30 @@ export interface DossierCriterion {
   note: string;
 }
 
+export interface PublicLink {
+  label: string; // напр. «Профиль на сайте компании», «Telegram-канал», «Доклад на конференции»
+  url: string;
+}
+
 export interface Dossier {
   identity: string; // якоря личности + предупреждение об однофамильцах
   layers: DossierLayer[];
   findings: DossierFinding[];
+  links: PublicLink[]; // публичные профессиональные профили и упоминания
   red_flags: string[];
   criteria: DossierCriterion[];
   weighted_score: number; // 0–100 средневзвешенное
   verify_on_interview: string[];
   recommendation: string; // вывод для ГД
+}
+
+export interface OutreachMessage {
+  channel: string; // «Прямое сообщение кандидату», «Запрос рекомендации у коннектора», «Короткий тизер»
+  text: string;
+}
+
+export interface OutreachResult {
+  messages: OutreachMessage[];
 }
 
 export interface BoardCandidate {
@@ -150,6 +165,7 @@ export interface BoardCandidate {
   score?: number; // соответствие брифу, если оценивали
   addedFrom: "osint" | "compare" | "manual";
   dossier?: Dossier; // глубокий OSINT-разбор, если собран
+  outreach?: OutreachResult; // сгенерированные письма для аутрича
   createdAt: number;
 }
 
