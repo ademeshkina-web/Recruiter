@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import Markdown from "@/components/Markdown";
-import {
-  AnalyzeResult,
-  CandidatesResult,
-  CompareResult,
-} from "@/lib/types";
+import Board from "@/components/Board";
+import { AnalyzeResult, BoardCandidate, CandidatesResult, CompareResult, Position } from "@/lib/types";
 import { SAMPLE_BRIEF } from "@/lib/sample";
+import { usePositions, uid } from "@/lib/store";
+import { exportDocx, exportMarkdown, exportCandidatesCsv } from "@/lib/export";
 
-type Tab = "vacancy" | "brief" | "sourcing" | "candidates" | "compare";
+type Tab = "vacancy" | "brief" | "sourcing" | "candidates" | "compare" | "board";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "vacancy", label: "Вакансия" },
@@ -17,7 +16,274 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sourcing", label: "Стратегия и каналы" },
   { id: "candidates", label: "Кандидаты" },
   { id: "compare", label: "Сравнение резюме" },
+  { id: "board", label: "Доска" },
 ];
+
+export default function Page() {
+  const store = usePositions();
+  return (
+    <main className="min-h-screen">
+      <header className="border-b border-ink/10 bg-white">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
+          <button onClick={() => store.setCurrentId(null)} className="text-left">
+            <h1 className="text-xl font-bold tracking-tight text-ink">Ассистент рекрутера</h1>
+            <p className="text-xs text-ink/50">
+              Бриф → вакансия, стратегия, каналы, кандидаты и доска подбора
+            </p>
+          </button>
+          {store.current && (
+            <button
+              onClick={() => store.setCurrentId(null)}
+              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
+            >
+              ← Все позиции
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-6xl px-5 py-8">
+        {!store.ready ? (
+          <div className="text-sm text-ink/40">Загрузка…</div>
+        ) : store.current ? (
+          <Workspace key={store.current.id} store={store} position={store.current} />
+        ) : (
+          <Home store={store} />
+        )}
+      </div>
+
+      <footer className="border-t border-ink/10 py-6 text-center text-xs text-ink/40">
+        Только публичная профессиональная информация, для легитимного найма.
+      </footer>
+    </main>
+  );
+}
+
+type Store = ReturnType<typeof usePositions>;
+
+function Home({ store }: { store: Store }) {
+  return (
+    <div>
+      <div className="mb-5 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-ink">Позиции</h2>
+        <button
+          onClick={() => store.create()}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+        >
+          + Новая позиция
+        </button>
+      </div>
+      {store.positions.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-ink/20 bg-white/60 p-10 text-center text-sm text-ink/50">
+          Пока нет ни одной позиции. Создайте первую и вставьте бриф.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {store.positions.map((p) => (
+            <div
+              key={p.id}
+              className="group rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition hover:border-accent/40"
+            >
+              <button onClick={() => store.setCurrentId(p.id)} className="block w-full text-left">
+                <div className="font-semibold text-ink">{p.analyze?.role_title || p.title}</div>
+                <div className="mt-0.5 text-xs text-ink/50">
+                  {p.company || "без компании"} ·{" "}
+                  {new Date(p.updatedAt).toLocaleDateString("ru-RU")}
+                </div>
+                <div className="mt-3 flex gap-3 text-xs text-ink/50">
+                  <span>{p.analyze ? "бриф готов" : "черновик"}</span>
+                  <span>· {p.candidates.length} на доске</span>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm("Удалить позицию?")) store.remove(p.id);
+                }}
+                className="mt-3 text-xs text-ink/30 opacity-0 transition group-hover:opacity-100 hover:text-red-600"
+              >
+                Удалить
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Workspace({ store, position }: { store: Store; position: Position }) {
+  const [brief, setBrief] = useState(position.brief);
+  const [company, setCompany] = useState(position.company);
+  const [role, setRole] = useState(position.role);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [err, setErr] = useState("");
+  const [tab, setTab] = useState<Tab>(position.analyze ? "vacancy" : "vacancy");
+
+  const a = position.analyze;
+
+  function persistInputs() {
+    store.update(position.id, { brief, company, role });
+  }
+
+  async function runAnalyze() {
+    setAnalyzing(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brief, company, role }),
+      });
+      const data = (await res.json()) as AnalyzeResult & { error?: string; demo?: boolean };
+      if (!res.ok) throw new Error(data.error || "Ошибка");
+      store.update(position.id, {
+        analyze: data,
+        brief,
+        company,
+        role,
+        title: data.role_title || position.title,
+      });
+      setTab("vacancy");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  return (
+    <div>
+      {/* Панель ввода и экспорта */}
+      <section className="rounded-xl border border-ink/10 bg-white p-5 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <input
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            onBlur={persistInputs}
+            placeholder="Компания (необязательно)"
+            className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+          <input
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            onBlur={persistInputs}
+            placeholder="Роль / подсказка (необязательно)"
+            className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+        </div>
+        <textarea
+          value={brief}
+          onChange={(e) => setBrief(e.target.value)}
+          onBlur={persistInputs}
+          placeholder="Вставьте бриф или описание вакансии…"
+          rows={6}
+          className="mt-3 w-full resize-y rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            onClick={runAnalyze}
+            disabled={analyzing || brief.trim().length < 20}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+          >
+            {analyzing ? "Анализирую…" : a ? "Пересобрать" : "Проанализировать бриф"}
+          </button>
+          <button
+            onClick={() => setBrief(SAMPLE_BRIEF)}
+            className="text-sm text-ink/50 underline underline-offset-2 hover:text-ink"
+          >
+            Вставить пример
+          </button>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => exportDocx(position)}
+              disabled={!a}
+              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
+            >
+              Экспорт .docx
+            </button>
+            <button
+              onClick={() => exportMarkdown(position)}
+              disabled={!a}
+              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
+            >
+              .md
+            </button>
+            <button
+              onClick={() => exportCandidatesCsv(position)}
+              disabled={position.candidates.length === 0}
+              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
+            >
+              Доска .csv
+            </button>
+          </div>
+        </div>
+        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      </section>
+
+      {(a || position.candidates.length > 0) && (
+        <section className="mt-8">
+          {a && (a as { demo?: boolean }).demo && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+              Демо-режим: задан пример без обращения к модели. Добавьте ANTHROPIC_API_KEY для работы с реальными брифами.
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-1 border-b border-ink/10">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+                  tab === t.id
+                    ? "border-accent text-ink"
+                    : "border-transparent text-ink/50 hover:text-ink"
+                }`}
+              >
+                {t.label}
+                {t.id === "board" && position.candidates.length > 0 && (
+                  <span className="ml-1 rounded-full bg-ink/10 px-1.5 text-xs">
+                    {position.candidates.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="py-6">
+            {!a && tab !== "board" && (
+              <p className="text-sm text-ink/50">Сначала проанализируйте бриф.</p>
+            )}
+            {a && tab === "vacancy" && <VacancyView a={a} />}
+            {a && tab === "brief" && <BriefView a={a} />}
+            {a && tab === "sourcing" && <SourcingView a={a} />}
+            {a && tab === "candidates" && (
+              <CandidatesView
+                context={buildContext(a)}
+                onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
+                onAdd={(c) => store.addCandidates(position.id, [c])}
+              />
+            )}
+            {a && tab === "compare" && (
+              <CompareView
+                defaultBrief={brief || SAMPLE_BRIEF}
+                onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
+                onAdd={(c) => store.addCandidates(position.id, [c])}
+              />
+            )}
+            {tab === "board" && (
+              <Board
+                position={position}
+                onUpdateCandidate={(cid, patch) => store.updateCandidate(position.id, cid, patch)}
+                onRemoveCandidate={(cid) => store.removeCandidate(position.id, cid)}
+                onAddManual={(c) => store.addCandidates(position.id, [c])}
+              />
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
 
 function buildContext(a: AnalyzeResult): string {
   const lines: string[] = [];
@@ -32,135 +298,7 @@ function buildContext(a: AnalyzeResult): string {
   return lines.join("\n");
 }
 
-export default function Page() {
-  const [brief, setBrief] = useState("");
-  const [company, setCompany] = useState("");
-  const [role, setRole] = useState("");
-
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzeErr, setAnalyzeErr] = useState("");
-  const [analyze, setAnalyze] = useState<(AnalyzeResult & { demo?: boolean }) | null>(null);
-  const [tab, setTab] = useState<Tab>("vacancy");
-
-  async function runAnalyze() {
-    setAnalyzing(true);
-    setAnalyzeErr("");
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief, company, role }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Ошибка");
-      setAnalyze(data);
-      setTab("vacancy");
-    } catch (e) {
-      setAnalyzeErr(e instanceof Error ? e.message : "Ошибка");
-    } finally {
-      setAnalyzing(false);
-    }
-  }
-
-  return (
-    <main className="min-h-screen">
-      <header className="border-b border-ink/10 bg-white">
-        <div className="mx-auto max-w-5xl px-5 py-6">
-          <h1 className="text-2xl font-bold tracking-tight text-ink">
-            Ассистент рекрутера
-          </h1>
-          <p className="mt-1 text-sm text-ink/60">
-            Бриф → интересная вакансия, сильный бриф, стратегия поиска и каналы,
-            кандидаты из открытых источников и сравнение резюме с брифом.
-          </p>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-5xl px-5 py-8">
-        {/* Ввод брифа */}
-        <section className="rounded-xl border border-ink/10 bg-white p-5 shadow-sm">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <input
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-              placeholder="Компания (необязательно)"
-              className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
-            />
-            <input
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder="Роль / подсказка (необязательно)"
-              className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
-            />
-          </div>
-          <textarea
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
-            placeholder="Вставьте бриф или описание вакансии…"
-            rows={7}
-            className="mt-3 w-full resize-y rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              onClick={runAnalyze}
-              disabled={analyzing || brief.trim().length < 20}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
-            >
-              {analyzing ? "Анализирую…" : "Проанализировать бриф"}
-            </button>
-            <button
-              onClick={() => setBrief(SAMPLE_BRIEF)}
-              className="text-sm text-ink/50 underline underline-offset-2 hover:text-ink"
-            >
-              Вставить пример
-            </button>
-            {analyzeErr && <span className="text-sm text-red-600">{analyzeErr}</span>}
-          </div>
-        </section>
-
-        {analyze && (
-          <section className="mt-8">
-            {analyze.demo && (
-              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-                Демо-режим: задан пример без обращения к модели. Добавьте
-                <code className="mx-1 rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code>,
-                чтобы работать с реальными брифами.
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-1 border-b border-ink/10">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
-                    tab === t.id
-                      ? "border-accent text-ink"
-                      : "border-transparent text-ink/50 hover:text-ink"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="py-6">
-              {tab === "vacancy" && <VacancyView a={analyze} />}
-              {tab === "brief" && <BriefView a={analyze} />}
-              {tab === "sourcing" && <SourcingView a={analyze} />}
-              {tab === "candidates" && <CandidatesView context={buildContext(analyze)} />}
-              {tab === "compare" && <CompareView defaultBrief={brief || SAMPLE_BRIEF} />}
-            </div>
-          </section>
-        )}
-      </div>
-
-      <footer className="border-t border-ink/10 py-6 text-center text-xs text-ink/40">
-        Только публичная профессиональная информация, для легитимного найма.
-      </footer>
-    </main>
-  );
-}
+// ---- Мелкие UI-хелперы ----
 
 function CopyBtn({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -185,9 +323,7 @@ function CopyBtn({ text }: { text: string }) {
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-ink/10 bg-white p-5 shadow-sm">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink/50">
-        {title}
-      </h3>
+      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink/50">{title}</h3>
       {children}
     </div>
   );
@@ -219,9 +355,7 @@ function VacancyView({ a }: { a: AnalyzeResult }) {
       ).map(([title, text]) => (
         <div key={title} className="rounded-xl border border-ink/10 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/50">
-              {title}
-            </h3>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/50">{title}</h3>
             <CopyBtn text={text} />
           </div>
           <div className="text-sm text-ink/90">
@@ -334,7 +468,31 @@ function NamedList({ items }: { items: { name: string; why: string }[] }) {
   );
 }
 
-function CandidatesView({ context }: { context: string }) {
+function AddBtn({ added, onClick }: { added: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={added}
+      className={`rounded-md border px-2 py-1 text-xs transition ${
+        added
+          ? "border-green-300 bg-green-50 text-green-700"
+          : "border-ink/15 text-ink/60 hover:bg-paper"
+      }`}
+    >
+      {added ? "на доске" : "+ на доску"}
+    </button>
+  );
+}
+
+function CandidatesView({
+  context,
+  onboard,
+  onAdd,
+}: {
+  context: string;
+  onboard: Set<string>;
+  onAdd: (c: BoardCandidate) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [data, setData] = useState<(CandidatesResult & { demo?: boolean }) | null>(null);
@@ -391,6 +549,7 @@ function CandidatesView({ context }: { context: string }) {
                   <th className="px-4 py-3">Сигнал</th>
                   <th className="px-4 py-3">Источник</th>
                   <th className="px-4 py-3">Увер.</th>
+                  <th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -420,6 +579,23 @@ function CandidatesView({ context }: { context: string }) {
                     <td className="px-4 py-3">
                       <ConfidenceBadge value={c.confidence} />
                     </td>
+                    <td className="px-4 py-3">
+                      <AddBtn
+                        added={onboard.has(c.name.toLowerCase())}
+                        onClick={() =>
+                          onAdd({
+                            id: uid(),
+                            name: c.name,
+                            role: `${c.current_role}${c.company ? ", " + c.company : ""}`,
+                            source: c.source,
+                            note: c.relevance,
+                            stage: "longlist",
+                            addedFrom: "osint",
+                            createdAt: Date.now(),
+                          })
+                        }
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -439,32 +615,31 @@ function CandidatesView({ context }: { context: string }) {
 
 function ConfidenceBadge({ value }: { value: string }) {
   const v = (value || "").toLowerCase();
-  const cls =
-    v.includes("выс")
-      ? "bg-green-100 text-green-800"
-      : v.includes("сред")
-        ? "bg-amber-100 text-amber-800"
-        : "bg-ink/10 text-ink/60";
+  const cls = v.includes("выс")
+    ? "bg-green-100 text-green-800"
+    : v.includes("сред")
+      ? "bg-amber-100 text-amber-800"
+      : "bg-ink/10 text-ink/60";
   return <span className={`rounded-full px-2 py-0.5 text-xs ${cls}`}>{value || "—"}</span>;
 }
 
-function CompareView({ defaultBrief }: { defaultBrief: string }) {
+function CompareView({
+  defaultBrief,
+  onboard,
+  onAdd,
+}: {
+  defaultBrief: string;
+  onboard: Set<string>;
+  onAdd: (c: BoardCandidate) => void;
+}) {
   const [cbrief, setCbrief] = useState(defaultBrief);
-  const [resumes, setResumes] = useState<{ name: string; text: string }[]>([
-    { name: "", text: "" },
-  ]);
+  const [resumes, setResumes] = useState<{ name: string; text: string }[]>([{ name: "", text: "" }]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [data, setData] = useState<(CompareResult & { demo?: boolean }) | null>(null);
 
   function update(i: number, field: "name" | "text", val: string) {
     setResumes((r) => r.map((x, idx) => (idx === i ? { ...x, [field]: val } : x)));
-  }
-  function add() {
-    setResumes((r) => [...r, { name: "", text: "" }]);
-  }
-  function remove(i: number) {
-    setResumes((r) => (r.length > 1 ? r.filter((_, idx) => idx !== i) : r));
   }
 
   async function run() {
@@ -474,10 +649,7 @@ function CompareView({ defaultBrief }: { defaultBrief: string }) {
       const res = await fetch("/api/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          brief: cbrief,
-          resumes: resumes.filter((r) => r.text.trim().length > 30),
-        }),
+        body: JSON.stringify({ brief: cbrief, resumes: resumes.filter((r) => r.text.trim().length > 30) }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Ошибка");
@@ -511,7 +683,7 @@ function CompareView({ defaultBrief }: { defaultBrief: string }) {
                 className="flex-1 rounded-lg border border-ink/15 px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
               <button
-                onClick={() => remove(i)}
+                onClick={() => setResumes((r) => (r.length > 1 ? r.filter((_, idx) => idx !== i) : r))}
                 className="rounded-md border border-ink/15 px-2 py-1 text-xs text-ink/50 hover:bg-paper"
               >
                 Убрать
@@ -530,7 +702,7 @@ function CompareView({ defaultBrief }: { defaultBrief: string }) {
 
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={add}
+          onClick={() => setResumes((r) => [...r, { name: "", text: "" }])}
           className="rounded-lg border border-ink/15 px-3 py-2 text-sm text-ink/70 hover:bg-paper"
         >
           + Ещё резюме
@@ -559,7 +731,25 @@ function CompareView({ defaultBrief }: { defaultBrief: string }) {
                   <div className="text-base font-bold text-ink">{c.name}</div>
                   <div className="text-sm text-ink/70">{c.verdict}</div>
                 </div>
-                <ScoreBadge score={c.score} />
+                <div className="flex items-center gap-3">
+                  <AddBtn
+                    added={onboard.has(c.name.toLowerCase())}
+                    onClick={() =>
+                      onAdd({
+                        id: uid(),
+                        name: c.name,
+                        role: "",
+                        source: "",
+                        note: c.verdict,
+                        stage: "interview",
+                        score: c.score,
+                        addedFrom: "compare",
+                        createdAt: Date.now(),
+                      })
+                    }
+                  />
+                  <ScoreBadge score={c.score} />
+                </div>
               </div>
               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>

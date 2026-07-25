@@ -97,3 +97,39 @@ export interface CompareResult {
 export interface ApiError {
   error: string;
 }
+
+// ---- Позиция и доска кандидатов (персистентная модель) ----
+
+export type Stage = "longlist" | "outreach" | "interview" | "final" | "rejected";
+
+export const STAGES: { id: Stage; label: string }[] = [
+  { id: "longlist", label: "Лонг-лист" },
+  { id: "outreach", label: "Аутрич" },
+  { id: "interview", label: "Интервью" },
+  { id: "final", label: "Финал" },
+  { id: "rejected", label: "Отказ" },
+];
+
+export interface BoardCandidate {
+  id: string;
+  name: string;
+  role: string; // текущая позиция и компания одной строкой
+  source: string; // ссылка/источник
+  note: string; // заметка рекрутера
+  stage: Stage;
+  score?: number; // соответствие брифу, если оценивали
+  addedFrom: "osint" | "compare" | "manual";
+  createdAt: number;
+}
+
+export interface Position {
+  id: string;
+  title: string;
+  company: string;
+  role: string;
+  brief: string;
+  analyze: AnalyzeResult | null;
+  candidates: BoardCandidate[];
+  createdAt: number;
+  updatedAt: number;
+}
