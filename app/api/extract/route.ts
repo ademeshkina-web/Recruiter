@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSessionUserId } from "@/lib/auth";
 import mammoth from "mammoth";
 import { extractText, hasApiKey } from "@/lib/anthropic";
 import { EXTRACT_SYSTEM } from "@/lib/prompts";
@@ -10,6 +11,9 @@ const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 const ALLOWED = new Set(["application/pdf", "text/plain", DOCX]);
 
 export async function POST(req: Request) {
+  if (!getSessionUserId()) {
+    return NextResponse.json({ error: "Не авторизован." }, { status: 401 });
+  }
   let body: { base64?: string; mediaType?: string; filename?: string };
   try {
     body = await req.json();

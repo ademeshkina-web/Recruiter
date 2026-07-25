@@ -3,28 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BoardCandidate, Position } from "./types";
 
-// Персистентное хранилище позиций в localStorage. Бэкенд не нужен —
-// это делает приложение системным (позиция сохраняется и к ней можно вернуться),
-// оставаясь чистым фронтендом. Мутаторы читают актуальный список из ref,
-// поэтому последовательные async-обновления (анализ → кандидаты) не затирают
-// друг друга из-за устаревших замыканий.
-
-const KEY = "recruiter.positions.v1";
+// Серверное хранилище позиций (per-user). Загружается по /api/positions,
+// изменения пишутся на сервер (PUT/DELETE). Локальное состояние обновляется
+// оптимистично; ref держит актуальный список, чтобы последовательные
+// async-мутации не затирали друг друга.
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-}
-
-function loadRaw(): Position[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw) as Position[];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
 }
 
 export function newPosition(title = "Новая позиция"): Position {
@@ -43,91 +28,126 @@ export function newPosition(title = "Новая позиция"): Position {
   };
 }
 
-export function usePositions() {
+async function savePosition(p: Position) {
+  try {
+    await fetch("/api/positions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ position: p }),
+    });
+  } catch {
+    /* оффлайн — локальное состояние сохраняется, синхронизируется позже */
+  }
+}
+
+async function deletePositionReq(id: string) {
+  try {
+    await fetch(`/api/positions?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch {
+    /* noop */
+  }
+}
+
+export function usePositions(authed: boolean) {
   const [positions, setPositions] = useState<Position[]>([]);
   const ref = useRef<Position[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    const loaded = loadRaw();
-    ref.current = loaded;
-    setPositions(loaded);
-    setReady(true);
-  }, []);
-
-  const persist = useCallback((next: Position[]) => {
+  const setLocal = useCallback((next: Position[]) => {
     ref.current = next;
     setPositions(next);
-    if (typeof window !== "undefined") window.localStorage.setItem(KEY, JSON.stringify(next));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authed) {
+      setLocal([]);
+      setCurrentId(null);
+      setReady(false);
+      return;
+    }
+    setReady(false);
+    fetch("/api/positions")
+      .then((r) => (r.ok ? r.json() : { positions: [] }))
+      .then((d) => {
+        if (cancelled) return;
+        setLocal(d.positions || []);
+        setReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLocal([]);
+        setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, setLocal]);
+
+  // Применить изменение к позиции id, сохранить локально и на сервере.
+  const patchAndSave = useCallback(
+    (id: string, fn: (p: Position) => Position) => {
+      let changed: Position | null = null;
+      const next = ref.current.map((p) => {
+        if (p.id !== id) return p;
+        changed = { ...fn(p), updatedAt: Date.now() };
+        return changed;
+      });
+      setLocal(next);
+      if (changed) savePosition(changed);
+    },
+    [setLocal],
+  );
 
   const create = useCallback(() => {
     const p = newPosition();
-    persist([p, ...ref.current]);
+    setLocal([p, ...ref.current]);
     setCurrentId(p.id);
+    savePosition(p);
     return p;
-  }, [persist]);
+  }, [setLocal]);
 
   const remove = useCallback(
     (id: string) => {
-      persist(ref.current.filter((p) => p.id !== id));
+      setLocal(ref.current.filter((p) => p.id !== id));
       setCurrentId((c) => (c === id ? null : c));
+      deletePositionReq(id);
     },
-    [persist],
+    [setLocal],
   );
 
   const update = useCallback(
-    (id: string, patch: Partial<Position>) => {
-      persist(
-        ref.current.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p)),
-      );
-    },
-    [persist],
+    (id: string, patch: Partial<Position>) => patchAndSave(id, (p) => ({ ...p, ...patch })),
+    [patchAndSave],
   );
 
   const addCandidates = useCallback(
-    (id: string, cands: BoardCandidate[]) => {
-      persist(
-        ref.current.map((p) => {
-          if (p.id !== id) return p;
-          const seen = new Set(p.candidates.map((c) => (c.name + c.source).toLowerCase()));
-          const fresh = cands.filter((c) => !seen.has((c.name + c.source).toLowerCase()));
-          return { ...p, candidates: [...p.candidates, ...fresh], updatedAt: Date.now() };
-        }),
-      );
-    },
-    [persist],
+    (id: string, cands: BoardCandidate[]) =>
+      patchAndSave(id, (p) => {
+        const seen = new Set(p.candidates.map((c) => (c.name + c.source).toLowerCase()));
+        const fresh = cands.filter((c) => !seen.has((c.name + c.source).toLowerCase()));
+        return { ...p, candidates: [...p.candidates, ...fresh] };
+      }),
+    [patchAndSave],
   );
 
   const updateCandidate = useCallback(
-    (id: string, candId: string, patch: Partial<BoardCandidate>) => {
-      persist(
-        ref.current.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                candidates: p.candidates.map((c) => (c.id === candId ? { ...c, ...patch } : c)),
-                updatedAt: Date.now(),
-              }
-            : p,
-        ),
-      );
-    },
-    [persist],
+    (id: string, candId: string, patch: Partial<BoardCandidate>) =>
+      patchAndSave(id, (p) => ({
+        ...p,
+        candidates: p.candidates.map((c) => (c.id === candId ? { ...c, ...patch } : c)),
+      })),
+    [patchAndSave],
   );
 
   const removeCandidate = useCallback(
-    (id: string, candId: string) => {
-      persist(
-        ref.current.map((p) =>
-          p.id === id
-            ? { ...p, candidates: p.candidates.filter((c) => c.id !== candId), updatedAt: Date.now() }
-            : p,
-        ),
-      );
-    },
-    [persist],
+    (id: string, candId: string) =>
+      patchAndSave(id, (p) => ({
+        ...p,
+        candidates: p.candidates.filter((c) => c.id !== candId),
+      })),
+    [patchAndSave],
   );
 
   const current = positions.find((p) => p.id === currentId) || null;
