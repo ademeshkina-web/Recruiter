@@ -1,0 +1,39 @@
+import { NextResponse } from "next/server";
+import { generateWithWebSearch, hasApiKey, parseJsonLoose } from "@/lib/anthropic";
+import { DOSSIER_SYSTEM, dossierUser } from "@/lib/prompts";
+import { Dossier } from "@/lib/types";
+import { SAMPLE_DOSSIER } from "@/lib/sample";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
+export async function POST(req: Request) {
+  let body: { name?: string; role?: string; context?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+  }
+
+  const name = (body.name || "").trim();
+  if (name.length < 2) {
+    return NextResponse.json({ error: "Не указан кандидат." }, { status: 400 });
+  }
+
+  if (!hasApiKey()) {
+    return NextResponse.json({ ...SAMPLE_DOSSIER, demo: true });
+  }
+
+  try {
+    const text = await generateWithWebSearch(
+      DOSSIER_SYSTEM,
+      dossierUser(name, body.role || "", body.context || ""),
+      12,
+    );
+    const result = parseJsonLoose<Dossier>(text);
+    return NextResponse.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Ошибка сбора досье.";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}

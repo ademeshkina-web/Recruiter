@@ -1,0 +1,55 @@
+import { NextResponse } from "next/server";
+import { extractText, hasApiKey } from "@/lib/anthropic";
+import { EXTRACT_SYSTEM } from "@/lib/prompts";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
+const ALLOWED = new Set(["application/pdf", "text/plain"]);
+
+export async function POST(req: Request) {
+  let body: { base64?: string; mediaType?: string; filename?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+  }
+
+  const { base64, mediaType } = body;
+  if (!base64 || !mediaType) {
+    return NextResponse.json({ error: "Файл не передан." }, { status: 400 });
+  }
+  if (!ALLOWED.has(mediaType)) {
+    return NextResponse.json(
+      { error: "Поддерживаются PDF и TXT. DOCX — сохраните как PDF или вставьте текст." },
+      { status: 400 },
+    );
+  }
+
+  // Текстовые файлы — без модели.
+  if (mediaType === "text/plain") {
+    try {
+      const text = Buffer.from(base64, "base64").toString("utf-8");
+      return NextResponse.json({ text });
+    } catch {
+      return NextResponse.json({ error: "Не удалось прочитать файл." }, { status: 400 });
+    }
+  }
+
+  // PDF — извлечение через нативный document-вход модели.
+  if (!hasApiKey()) {
+    return NextResponse.json({
+      text: "",
+      demo: true,
+      note: "Демо-режим: извлечение текста из PDF работает при заданном ANTHROPIC_API_KEY. Пока вставьте текст резюме вручную.",
+    });
+  }
+
+  try {
+    const text = await extractText(EXTRACT_SYSTEM, base64, mediaType);
+    return NextResponse.json({ text });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Ошибка извлечения текста.";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
