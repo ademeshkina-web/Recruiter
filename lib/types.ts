@@ -129,6 +129,7 @@ export interface Position {
   role: string;
   brief: string;
   analyze: AnalyzeResult | null;
+  sourced: CandidatesResult | null; // найденные по открытым источникам
   candidates: BoardCandidate[];
   createdAt: number;
   updatedAt: number;

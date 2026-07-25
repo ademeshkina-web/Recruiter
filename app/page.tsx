@@ -3,14 +3,21 @@
 import { useState } from "react";
 import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
-import { AnalyzeResult, BoardCandidate, CandidatesResult, CompareResult, Position } from "@/lib/types";
+import {
+  AnalyzeResult,
+  BoardCandidate,
+  CandidatesResult,
+  CompareResult,
+  Position,
+} from "@/lib/types";
 import { SAMPLE_BRIEF } from "@/lib/sample";
 import { usePositions, uid } from "@/lib/store";
 import { exportDocx, exportMarkdown, exportCandidatesCsv } from "@/lib/export";
 
-type Tab = "vacancy" | "brief" | "sourcing" | "candidates" | "compare" | "board";
+type Tab = "overview" | "vacancy" | "brief" | "sourcing" | "candidates" | "compare" | "board";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Обзор" },
   { id: "vacancy", label: "Вакансия" },
   { id: "brief", label: "Сильный бриф" },
   { id: "sourcing", label: "Стратегия и каналы" },
@@ -28,7 +35,7 @@ export default function Page() {
           <button onClick={() => store.setCurrentId(null)} className="text-left">
             <h1 className="text-xl font-bold tracking-tight text-ink">Ассистент рекрутера</h1>
             <p className="text-xs text-ink/50">
-              Бриф → вакансия, стратегия, каналы, кандидаты и доска подбора
+              Одна кнопка: бриф → вакансия, стратегия, каналы, кандидаты и доска подбора
             </p>
           </button>
           {store.current && (
@@ -70,13 +77,18 @@ function Home({ store }: { store: Store }) {
           onClick={() => store.create()}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
         >
-          + Новая позиция
+          + Добавить новую позицию
         </button>
       </div>
       {store.positions.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-ink/20 bg-white/60 p-10 text-center text-sm text-ink/50">
-          Пока нет ни одной позиции. Создайте первую и вставьте бриф.
-        </div>
+        <button
+          onClick={() => store.create()}
+          className="block w-full rounded-xl border border-dashed border-ink/20 bg-white/60 p-12 text-center text-sm text-ink/50 transition hover:border-accent/40 hover:text-ink"
+        >
+          Пока нет ни одной позиции.
+          <br />
+          Нажмите, чтобы создать первую стратегию поиска и вставить бриф.
+        </button>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {store.positions.map((p) => (
@@ -91,7 +103,7 @@ function Home({ store }: { store: Store }) {
                   {new Date(p.updatedAt).toLocaleDateString("ru-RU")}
                 </div>
                 <div className="mt-3 flex gap-3 text-xs text-ink/50">
-                  <span>{p.analyze ? "бриф готов" : "черновик"}</span>
+                  <span>{p.analyze ? "стратегия готова" : "черновик"}</span>
                   <span>· {p.candidates.length} на доске</span>
                 </div>
               </button>
@@ -111,191 +123,400 @@ function Home({ store }: { store: Store }) {
   );
 }
 
+function buildContext(a: AnalyzeResult): string {
+  return [
+    `Роль: ${a.role_title}`,
+    `Суть: ${a.headline}`,
+    `Рамка роли: ${a.brief.role_frame}`,
+    `Must-have: ${a.brief.must_have.join("; ")}`,
+    `Смежные пулы: ${a.sourcing.adjacent_pools.map((p) => p.name).join("; ")}`,
+    `Компании-доноры: ${a.sourcing.donor_companies.map((p) => p.name).join("; ")}`,
+    `Каналы: ${a.sourcing.channels.map((c) => `${c.name} (${c.type})`).join("; ")}`,
+    `Условия: ${a.brief.conditions}`,
+  ].join("\n");
+}
+
+function mapSourced(d: CandidatesResult): BoardCandidate[] {
+  return d.candidates.map((c) => ({
+    id: uid(),
+    name: c.name,
+    role: `${c.current_role}${c.company ? ", " + c.company : ""}`,
+    source: c.source,
+    note: c.relevance,
+    stage: "longlist",
+    addedFrom: "osint",
+    createdAt: Date.now(),
+  }));
+}
+
 function Workspace({ store, position }: { store: Store; position: Position }) {
+  const a = position.analyze;
   const [brief, setBrief] = useState(position.brief);
   const [company, setCompany] = useState(position.company);
   const [role, setRole] = useState(position.role);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [editing, setEditing] = useState(!a);
+  const [phase, setPhase] = useState(0); // 0 idle · 1 анализ · 2 кандидаты
+  const [candLoading, setCandLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<Tab>(position.analyze ? "vacancy" : "vacancy");
-
-  const a = position.analyze;
+  const [candErr, setCandErr] = useState("");
+  const [tab, setTab] = useState<Tab>("overview");
 
   function persistInputs() {
     store.update(position.id, { brief, company, role });
   }
 
-  async function runAnalyze() {
-    setAnalyzing(true);
+  async function runCandidates(aData: AnalyzeResult) {
+    const res = await fetch("/api/candidates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ context: buildContext(aData) }),
+    });
+    const d = (await res.json()) as CandidatesResult & { error?: string };
+    if (!res.ok) throw new Error(d.error || "Ошибка поиска кандидатов");
+    store.update(position.id, { sourced: d });
+    store.addCandidates(position.id, mapSourced(d));
+    return d;
+  }
+
+  // Единый прогон: бриф → вакансия/стратегия → кандидаты → доска.
+  async function runAll() {
     setErr("");
+    setCandErr("");
     try {
+      setPhase(1);
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brief, company, role }),
       });
-      const data = (await res.json()) as AnalyzeResult & { error?: string; demo?: boolean };
-      if (!res.ok) throw new Error(data.error || "Ошибка");
+      const aData = (await res.json()) as AnalyzeResult & { error?: string };
+      if (!res.ok) throw new Error(aData.error || "Ошибка анализа");
       store.update(position.id, {
-        analyze: data,
+        analyze: aData,
         brief,
         company,
         role,
-        title: data.role_title || position.title,
+        title: aData.role_title || position.title,
       });
-      setTab("vacancy");
+      setEditing(false);
+      setTab("overview");
+
+      setPhase(2);
+      try {
+        await runCandidates(aData);
+      } catch (ce) {
+        // Поиск кандидатов может не пройти (веб-поиск) — не валим весь прогон.
+        setCandErr(ce instanceof Error ? ce.message : "Ошибка поиска кандидатов");
+      }
+      setPhase(0);
     } catch (e) {
+      setPhase(0);
       setErr(e instanceof Error ? e.message : "Ошибка");
-    } finally {
-      setAnalyzing(false);
     }
   }
 
+  async function refreshCandidates() {
+    if (!a) return;
+    setCandLoading(true);
+    setCandErr("");
+    try {
+      await runCandidates(a);
+    } catch (e) {
+      setCandErr(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setCandLoading(false);
+    }
+  }
+
+  // ---- Экран ввода брифа (единая точка входа) ----
+  if (editing || !a) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <div className="rounded-xl border border-ink/10 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-ink">Новая стратегия поиска</h2>
+          <p className="mt-1 text-sm text-ink/60">
+            Вставьте бриф — приложение само переформатирует вакансию, соберёт сильный бриф,
+            стратегию и каналы и найдёт кандидатов по открытым источникам.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+              onBlur={persistInputs}
+              placeholder="Компания (необязательно)"
+              className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <input
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              onBlur={persistInputs}
+              placeholder="Роль / подсказка (необязательно)"
+              className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          <textarea
+            value={brief}
+            onChange={(e) => setBrief(e.target.value)}
+            onBlur={persistInputs}
+            placeholder="Вставьте бриф или описание вакансии…"
+            rows={8}
+            className="mt-3 w-full resize-y rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={runAll}
+              disabled={phase > 0 || brief.trim().length < 20}
+              className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+            >
+              {phase > 0 ? "Формирую…" : "Сформировать стратегию и найти кандидатов"}
+            </button>
+            {a && (
+              <button
+                onClick={() => setEditing(false)}
+                className="text-sm text-ink/50 underline underline-offset-2 hover:text-ink"
+              >
+                Отмена
+              </button>
+            )}
+            <button
+              onClick={() => setBrief(SAMPLE_BRIEF)}
+              className="text-sm text-ink/50 underline underline-offset-2 hover:text-ink"
+            >
+              Вставить пример
+            </button>
+          </div>
+          {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
+          {phase > 0 && <Stepper phase={phase} />}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Готовая стратегия ----
   return (
     <div>
-      {/* Панель ввода и экспорта */}
-      <section className="rounded-xl border border-ink/10 bg-white p-5 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <input
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
-            onBlur={persistInputs}
-            placeholder="Компания (необязательно)"
-            className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-          <input
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            onBlur={persistInputs}
-            placeholder="Роль / подсказка (необязательно)"
-            className="rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
-          />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-ink">{a.role_title}</h2>
+          {position.company && <div className="text-xs text-ink/50">{position.company}</div>}
         </div>
-        <textarea
-          value={brief}
-          onChange={(e) => setBrief(e.target.value)}
-          onBlur={persistInputs}
-          placeholder="Вставьте бриф или описание вакансии…"
-          rows={6}
-          className="mt-3 w-full resize-y rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
-        />
-        <div className="mt-3 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={runAnalyze}
-            disabled={analyzing || brief.trim().length < 20}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+            onClick={() => setEditing(true)}
+            className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
           >
-            {analyzing ? "Анализирую…" : a ? "Пересобрать" : "Проанализировать бриф"}
+            Изменить бриф
           </button>
           <button
-            onClick={() => setBrief(SAMPLE_BRIEF)}
-            className="text-sm text-ink/50 underline underline-offset-2 hover:text-ink"
+            onClick={runAll}
+            disabled={phase > 0}
+            className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
           >
-            Вставить пример
+            {phase > 0 ? "Пересобираю…" : "Пересобрать"}
           </button>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => exportDocx(position)}
-              disabled={!a}
-              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
-            >
-              Экспорт .docx
-            </button>
-            <button
-              onClick={() => exportMarkdown(position)}
-              disabled={!a}
-              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
-            >
-              .md
-            </button>
-            <button
-              onClick={() => exportCandidatesCsv(position)}
-              disabled={position.candidates.length === 0}
-              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
-            >
-              Доска .csv
-            </button>
-          </div>
+          <span className="mx-1 h-5 w-px bg-ink/10" />
+          <button
+            onClick={() => exportDocx(position)}
+            className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
+          >
+            .docx
+          </button>
+          <button
+            onClick={() => exportMarkdown(position)}
+            className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
+          >
+            .md
+          </button>
+          <button
+            onClick={() => exportCandidatesCsv(position)}
+            disabled={position.candidates.length === 0}
+            className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
+          >
+            Доска .csv
+          </button>
         </div>
-        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
-      </section>
+      </div>
 
-      {(a || position.candidates.length > 0) && (
-        <section className="mt-8">
-          {a && (a as { demo?: boolean }).demo && (
-            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-              Демо-режим: задан пример без обращения к модели. Добавьте ANTHROPIC_API_KEY для работы с реальными брифами.
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-1 border-b border-ink/10">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
-                  tab === t.id
-                    ? "border-accent text-ink"
-                    : "border-transparent text-ink/50 hover:text-ink"
-                }`}
-              >
-                {t.label}
-                {t.id === "board" && position.candidates.length > 0 && (
-                  <span className="ml-1 rounded-full bg-ink/10 px-1.5 text-xs">
-                    {position.candidates.length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          <div className="py-6">
-            {!a && tab !== "board" && (
-              <p className="text-sm text-ink/50">Сначала проанализируйте бриф.</p>
-            )}
-            {a && tab === "vacancy" && <VacancyView a={a} />}
-            {a && tab === "brief" && <BriefView a={a} />}
-            {a && tab === "sourcing" && <SourcingView a={a} />}
-            {a && tab === "candidates" && (
-              <CandidatesView
-                context={buildContext(a)}
-                onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
-                onAdd={(c) => store.addCandidates(position.id, [c])}
-              />
-            )}
-            {a && tab === "compare" && (
-              <CompareView
-                defaultBrief={brief || SAMPLE_BRIEF}
-                onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
-                onAdd={(c) => store.addCandidates(position.id, [c])}
-              />
-            )}
-            {tab === "board" && (
-              <Board
-                position={position}
-                onUpdateCandidate={(cid, patch) => store.updateCandidate(position.id, cid, patch)}
-                onRemoveCandidate={(cid) => store.removeCandidate(position.id, cid)}
-                onAddManual={(c) => store.addCandidates(position.id, [c])}
-              />
-            )}
-          </div>
-        </section>
+      {(a as { demo?: boolean }).demo && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          Демо-режим: пример без обращения к модели. Добавьте ANTHROPIC_API_KEY для реальных брифов.
+        </div>
       )}
+      {phase > 0 && <Stepper phase={phase} />}
+
+      <div className="flex flex-wrap gap-1 border-b border-ink/10">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+              tab === t.id ? "border-accent text-ink" : "border-transparent text-ink/50 hover:text-ink"
+            }`}
+          >
+            {t.label}
+            {t.id === "board" && position.candidates.length > 0 && (
+              <span className="ml-1 rounded-full bg-ink/10 px-1.5 text-xs">
+                {position.candidates.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="py-6">
+        {tab === "overview" && (
+          <Overview position={position} onGo={setTab} onboardCount={position.candidates.length} />
+        )}
+        {tab === "vacancy" && <VacancyView a={a} />}
+        {tab === "brief" && <BriefView a={a} />}
+        {tab === "sourcing" && <SourcingView a={a} />}
+        {tab === "candidates" && (
+          <CandidatesView
+            data={position.sourced}
+            loading={candLoading || phase === 2}
+            err={candErr}
+            onRefresh={refreshCandidates}
+            onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
+            onAdd={(c) => store.addCandidates(position.id, [c])}
+          />
+        )}
+        {tab === "compare" && (
+          <CompareView
+            defaultBrief={position.brief || SAMPLE_BRIEF}
+            onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
+            onAdd={(c) => store.addCandidates(position.id, [c])}
+          />
+        )}
+        {tab === "board" && (
+          <Board
+            position={position}
+            onUpdateCandidate={(cid, patch) => store.updateCandidate(position.id, cid, patch)}
+            onRemoveCandidate={(cid) => store.removeCandidate(position.id, cid)}
+            onAddManual={(c) => store.addCandidates(position.id, [c])}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function buildContext(a: AnalyzeResult): string {
-  const lines: string[] = [];
-  lines.push(`Роль: ${a.role_title}`);
-  lines.push(`Суть: ${a.headline}`);
-  lines.push(`Рамка роли: ${a.brief.role_frame}`);
-  lines.push(`Must-have: ${a.brief.must_have.join("; ")}`);
-  lines.push(`Смежные пулы: ${a.sourcing.adjacent_pools.map((p) => p.name).join("; ")}`);
-  lines.push(`Компании-доноры: ${a.sourcing.donor_companies.map((p) => p.name).join("; ")}`);
-  lines.push(`Каналы: ${a.sourcing.channels.map((c) => `${c.name} (${c.type})`).join("; ")}`);
-  lines.push(`Условия: ${a.brief.conditions}`);
-  return lines.join("\n");
+function Stepper({ phase }: { phase: number }) {
+  const steps = [
+    { n: 1, label: "Вакансия, сильный бриф и стратегия" },
+    { n: 2, label: "Кандидаты из открытых источников" },
+  ];
+  return (
+    <div className="my-4 rounded-lg border border-ink/10 bg-white p-4">
+      <ul className="space-y-2">
+        {steps.map((s) => {
+          const status = phase > s.n ? "done" : phase === s.n ? "active" : "pending";
+          return (
+            <li key={s.n} className="flex items-center gap-3 text-sm">
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
+                  status === "done"
+                    ? "bg-green-500 text-white"
+                    : status === "active"
+                      ? "bg-accent text-white"
+                      : "bg-ink/10 text-ink/40"
+                }`}
+              >
+                {status === "done" ? "✓" : status === "active" ? "•" : s.n}
+              </span>
+              <span className={status === "pending" ? "text-ink/40" : "text-ink/80"}>
+                {s.label}
+                {status === "active" && " …"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ---- Обзор ----
+
+function Overview({
+  position,
+  onGo,
+  onboardCount,
+}: {
+  position: Position;
+  onGo: (t: Tab) => void;
+  onboardCount: number;
+}) {
+  const a = position.analyze!;
+  const found = position.sourced?.candidates.length ?? 0;
+  const tiles = [
+    { label: "must-have", value: a.brief.must_have.length, tab: "brief" as Tab },
+    { label: "каналов", value: a.sourcing.channels.length, tab: "sourcing" as Tab },
+    { label: "найдено кандидатов", value: found, tab: "candidates" as Tab },
+    { label: "на доске", value: onboardCount, tab: "board" as Tab },
+  ];
+  return (
+    <div className="space-y-5">
+      <p className="text-lg font-medium italic text-ink/80">«{a.headline}»</p>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {tiles.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => onGo(t.tab)}
+            className="rounded-xl border border-ink/10 bg-white p-4 text-left shadow-sm transition hover:border-accent/40"
+          >
+            <div className="text-2xl font-bold text-ink">{t.value}</div>
+            <div className="text-xs text-ink/50">{t.label}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <Card title="Рамка роли">
+          <p className="text-sm italic leading-relaxed text-ink/90">{a.brief.role_frame}</p>
+          <button
+            onClick={() => onGo("vacancy")}
+            className="mt-3 text-sm text-accent underline underline-offset-2"
+          >
+            Открыть тексты вакансии →
+          </button>
+        </Card>
+        <Card title="С чего начать поиск">
+          <p className="text-sm leading-relaxed text-ink/90">
+            {position.sourced?.recommendation || "Кандидаты ещё не найдены — откройте вкладку «Кандидаты»."}
+          </p>
+          <button
+            onClick={() => onGo(found ? "board" : "candidates")}
+            className="mt-3 text-sm text-accent underline underline-offset-2"
+          >
+            {found ? "Перейти к доске подбора →" : "Найти кандидатов →"}
+          </button>
+        </Card>
+      </div>
+
+      <Card title="Ключевые каналы">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {a.sourcing.channels.slice(0, 4).map((c, i) => (
+            <div key={i} className="rounded-lg border border-ink/10 bg-paper p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-ink">{c.name}</span>
+                <span className="rounded-full bg-accentsoft px-2 py-0.5 text-xs text-ink/70">
+                  {c.type}
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-ink/70">{c.why}</p>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={() => onGo("sourcing")}
+          className="mt-3 text-sm text-accent underline underline-offset-2"
+        >
+          Вся стратегия и Boolean-строки →
+        </button>
+      </Card>
+    </div>
+  );
 }
 
 // ---- Мелкие UI-хелперы ----
@@ -485,60 +706,48 @@ function AddBtn({ added, onClick }: { added: boolean; onClick: () => void }) {
 }
 
 function CandidatesView({
-  context,
+  data,
+  loading,
+  err,
+  onRefresh,
   onboard,
   onAdd,
 }: {
-  context: string;
+  data: CandidatesResult | null;
+  loading: boolean;
+  err: string;
+  onRefresh: () => void;
   onboard: Set<string>;
   onAdd: (c: BoardCandidate) => void;
 }) {
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
-  const [data, setData] = useState<(CandidatesResult & { demo?: boolean }) | null>(null);
-
-  async function run() {
-    setLoading(true);
-    setErr("");
-    try {
-      const res = await fetch("/api/candidates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ context }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Ошибка");
-      setData(d);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Ошибка");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <button
-          onClick={run}
+          onClick={onRefresh}
           disabled={loading}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+          className="rounded-lg border border-ink/15 px-4 py-2 text-sm font-semibold text-ink/80 transition hover:bg-paper disabled:opacity-40"
         >
-          {loading ? "Ищу по открытым источникам…" : "Найти кандидатов"}
+          {loading ? "Ищу по открытым источникам…" : data ? "Обновить список" : "Найти кандидатов"}
         </button>
         <span className="text-xs text-ink/50">
-          Поиск по публичным профессиональным источникам. Результат — гипотезы для аутрича.
+          Найденные автоматически попадают на доску (Лонг-лист). Результат — гипотезы для аутрича.
         </span>
         {err && <span className="text-sm text-red-600">{err}</span>}
       </div>
 
+      {!data && !loading && (
+        <p className="text-sm text-ink/50">Кандидаты ещё не найдены.</p>
+      )}
+
+      {(data as (CandidatesResult & { demo?: boolean }) | null)?.demo && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          Демо-режим: реальный OSINT-поиск включается при заданном ANTHROPIC_API_KEY.
+        </div>
+      )}
+
       {data && (
         <div className="space-y-4">
-          {data.demo && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-              Демо-режим: реальный OSINT-поиск включается при заданном ANTHROPIC_API_KEY.
-            </div>
-          )}
           <div className="overflow-x-auto rounded-xl border border-ink/10 bg-white shadow-sm">
             <table className="w-full text-left text-sm">
               <thead className="bg-paper text-xs uppercase text-ink/50">
