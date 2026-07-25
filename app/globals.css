@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: #f7f6f2;
+  color: #14181f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.prose-vacancy p {
+  margin: 0 0 0.7rem 0;
+  line-height: 1.55;
+}
+.prose-vacancy strong {
+  font-weight: 700;
+}
+
+textarea,
+input {
+  font-family: inherit;
+}
+
+::selection {
+  background: #e8dfd4;
+}
