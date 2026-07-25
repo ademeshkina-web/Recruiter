@@ -11,6 +11,9 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+# Docker сам ставит HOSTNAME = ID контейнера; Next standalone тогда слушает
+# не тот адрес и снаружи не открывается. Явно слушаем на всех интерфейсах.
+ENV HOSTNAME=0.0.0.0
 # standalone-вывод содержит только нужные файлы и мини-сервер
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
