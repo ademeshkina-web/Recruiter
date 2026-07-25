@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
+import mammoth from "mammoth";
 import { extractText, hasApiKey } from "@/lib/anthropic";
 import { EXTRACT_SYSTEM } from "@/lib/prompts";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const ALLOWED = new Set(["application/pdf", "text/plain"]);
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const ALLOWED = new Set(["application/pdf", "text/plain", DOCX]);
 
 export async function POST(req: Request) {
   let body: { base64?: string; mediaType?: string; filename?: string };
@@ -21,7 +23,7 @@ export async function POST(req: Request) {
   }
   if (!ALLOWED.has(mediaType)) {
     return NextResponse.json(
-      { error: "Поддерживаются PDF и TXT. DOCX — сохраните как PDF или вставьте текст." },
+      { error: "Поддерживаются PDF, DOCX и TXT." },
       { status: 400 },
     );
   }
@@ -33,6 +35,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ text });
     } catch {
       return NextResponse.json({ error: "Не удалось прочитать файл." }, { status: 400 });
+    }
+  }
+
+  // DOCX — извлекаем локально (модель не нужна, работает и в демо).
+  if (mediaType === DOCX) {
+    try {
+      const buffer = Buffer.from(base64, "base64");
+      const { value } = await mammoth.extractRawText({ buffer });
+      const text = (value || "").trim();
+      if (!text) {
+        return NextResponse.json(
+          { error: "В DOCX не найден текст. Попробуйте PDF или вставьте текст вручную." },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({ text });
+    } catch {
+      return NextResponse.json({ error: "Не удалось прочитать DOCX." }, { status: 400 });
     }
   }
 
