@@ -165,6 +165,18 @@ function buildContext(a: AnalyzeResult): string {
   ].join("\n");
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] || ""); // убрать data:...;base64,
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function mapSourced(d: CandidatesResult): BoardCandidate[] {
   return d.candidates.map((c) => ({
     id: uid(),
@@ -419,6 +431,7 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
         {tab === "board" && (
           <Board
             position={position}
+            dossierContext={buildContext(a)}
             onUpdateCandidate={(cid, patch) => store.updateCandidate(position.id, cid, patch)}
             onRemoveCandidate={(cid) => store.removeCandidate(position.id, cid)}
             onAddManual={(c) => store.addCandidates(position.id, [c])}
@@ -873,11 +886,44 @@ function CompareView({
   const [cbrief, setCbrief] = useState(defaultBrief);
   const [resumes, setResumes] = useState<{ name: string; text: string }[]>([{ name: "", text: "" }]);
   const [loading, setLoading] = useState(false);
+  const [uploadingIdx, setUploadingIdx] = useState<number | null>(null);
   const [err, setErr] = useState("");
   const [data, setData] = useState<(CompareResult & { demo?: boolean }) | null>(null);
 
   function update(i: number, field: "name" | "text", val: string) {
     setResumes((r) => r.map((x, idx) => (idx === i ? { ...x, [field]: val } : x)));
+  }
+
+  async function uploadFor(i: number, file: File) {
+    setErr("");
+    setUploadingIdx(i);
+    try {
+      const b64 = await fileToBase64(file);
+      const mediaType =
+        file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain");
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base64: b64, mediaType, filename: file.name }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Ошибка загрузки");
+      if (d.note) setErr(d.note);
+      setResumes((r) =>
+        r.map((x, idx) =>
+          idx === i
+            ? {
+                name: x.name || file.name.replace(/\.(pdf|txt)$/i, ""),
+                text: d.text || x.text,
+              }
+            : x,
+        ),
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Ошибка загрузки");
+    } finally {
+      setUploadingIdx(null);
+    }
   }
 
   async function run() {
@@ -913,13 +959,26 @@ function CompareView({
       <div className="space-y-3">
         {resumes.map((r, i) => (
           <div key={i} className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <input
                 value={r.name}
                 onChange={(e) => update(i, "name", e.target.value)}
                 placeholder={`Имя кандидата ${i + 1} (необязательно)`}
-                className="flex-1 rounded-lg border border-ink/15 px-3 py-1.5 text-sm outline-none focus:border-accent"
+                className="min-w-[180px] flex-1 rounded-lg border border-ink/15 px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
+              <label className="cursor-pointer rounded-md border border-ink/15 px-2 py-1 text-xs text-ink/60 hover:bg-paper">
+                {uploadingIdx === i ? "Загружаю…" : "Загрузить PDF/TXT"}
+                <input
+                  type="file"
+                  accept=".pdf,.txt,application/pdf,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadFor(i, f);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
               <button
                 onClick={() => setResumes((r) => (r.length > 1 ? r.filter((_, idx) => idx !== i) : r))}
                 className="rounded-md border border-ink/15 px-2 py-1 text-xs text-ink/50 hover:bg-paper"

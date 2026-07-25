@@ -110,6 +110,36 @@ export const STAGES: { id: Stage; label: string }[] = [
   { id: "rejected", label: "Отказ" },
 ];
 
+export interface DossierLayer {
+  name: string; // Базовый / Личность / Риски
+  status: "проверено" | "недоступно" | "расхождение" | string;
+  summary: string;
+}
+
+export interface DossierFinding {
+  text: string;
+  date: string; // дата публикации источника
+  source: string;
+}
+
+export interface DossierCriterion {
+  name: string;
+  weight: "×2" | "×1.5" | "×1" | string;
+  score: number; // 1–10
+  note: string;
+}
+
+export interface Dossier {
+  identity: string; // якоря личности + предупреждение об однофамильцах
+  layers: DossierLayer[];
+  findings: DossierFinding[];
+  red_flags: string[];
+  criteria: DossierCriterion[];
+  weighted_score: number; // 0–100 средневзвешенное
+  verify_on_interview: string[];
+  recommendation: string; // вывод для ГД
+}
+
 export interface BoardCandidate {
   id: string;
   name: string;
@@ -119,6 +149,7 @@ export interface BoardCandidate {
   stage: Stage;
   score?: number; // соответствие брифу, если оценивали
   addedFrom: "osint" | "compare" | "manual";
+  dossier?: Dossier; // глубокий OSINT-разбор, если собран
   createdAt: number;
 }
 

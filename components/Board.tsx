@@ -1,22 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import { BoardCandidate, Position, Stage, STAGES } from "@/lib/types";
+import { BoardCandidate, Dossier, Position, Stage, STAGES } from "@/lib/types";
 import { uid } from "@/lib/store";
+import DossierModal from "@/components/Dossier";
 
 export default function Board({
   position,
+  dossierContext,
   onUpdateCandidate,
   onRemoveCandidate,
   onAddManual,
 }: {
   position: Position;
+  dossierContext: string;
   onUpdateCandidate: (candId: string, patch: Partial<BoardCandidate>) => void;
   onRemoveCandidate: (candId: string) => void;
   onAddManual: (c: BoardCandidate) => void;
 }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const openCand = position.candidates.find((c) => c.id === openId) || null;
 
   function addManual() {
     if (!name.trim()) return;
@@ -34,46 +42,82 @@ export default function Board({
     setRole("");
   }
 
-  if (position.candidates.length === 0) {
-    return (
-      <div>
-        <ManualAdd name={name} role={role} setName={setName} setRole={setRole} add={addManual} />
-        <p className="mt-6 text-sm text-ink/50">
-          Доска пуста. Добавляйте кандидатов кнопкой «+ на доску» на вкладках
-          «Кандидаты» и «Сравнение резюме» — или вручную выше.
-        </p>
-      </div>
-    );
+  async function runDossier(c: BoardCandidate) {
+    setLoading(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/dossier", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: c.name, role: c.role, context: dossierContext }),
+      });
+      const d = (await res.json()) as Dossier & { error?: string };
+      if (!res.ok) throw new Error(d.error || "Ошибка");
+      onUpdateCandidate(c.id, { dossier: d });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openDossier(c: BoardCandidate) {
+    setErr("");
+    setOpenId(c.id);
+    if (!c.dossier) runDossier(c);
   }
 
   return (
     <div>
       <ManualAdd name={name} role={role} setName={setName} setRole={setRole} add={addManual} />
-      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-5">
-        {STAGES.map((st) => {
-          const cards = position.candidates.filter((c) => c.stage === st.id);
-          return (
-            <div key={st.id} className="rounded-xl border border-ink/10 bg-paper/60 p-2">
-              <div className="mb-2 flex items-center justify-between px-1 py-1">
-                <span className="text-sm font-semibold text-ink">{st.label}</span>
-                <span className="rounded-full bg-ink/10 px-2 text-xs text-ink/60">
-                  {cards.length}
-                </span>
+
+      {position.candidates.length === 0 ? (
+        <p className="mt-6 text-sm text-ink/50">
+          Доска пуста. Добавляйте кандидатов кнопкой «+ на доску» на вкладках
+          «Кандидаты» и «Сравнение резюме» — или вручную выше.
+        </p>
+      ) : (
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-5">
+          {STAGES.map((st) => {
+            const cards = position.candidates.filter((c) => c.stage === st.id);
+            return (
+              <div key={st.id} className="rounded-xl border border-ink/10 bg-paper/60 p-2">
+                <div className="mb-2 flex items-center justify-between px-1 py-1">
+                  <span className="text-sm font-semibold text-ink">{st.label}</span>
+                  <span className="rounded-full bg-ink/10 px-2 text-xs text-ink/60">
+                    {cards.length}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {cards.map((c) => (
+                    <Card
+                      key={c.id}
+                      c={c}
+                      onUpdate={(patch) => onUpdateCandidate(c.id, patch)}
+                      onRemove={() => onRemoveCandidate(c.id)}
+                      onDossier={() => openDossier(c)}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="space-y-2">
-                {cards.map((c) => (
-                  <Card
-                    key={c.id}
-                    c={c}
-                    onUpdate={(patch) => onUpdateCandidate(c.id, patch)}
-                    onRemove={() => onRemoveCandidate(c.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
+
+      {openId && openCand && (
+        <DossierModal
+          name={openCand.name}
+          dossier={(openCand.dossier as (Dossier & { demo?: boolean }) | undefined) || null}
+          loading={loading}
+          err={err}
+          onClose={() => {
+            setOpenId(null);
+            setErr("");
+          }}
+          onRefresh={() => runDossier(openCand)}
+        />
+      )}
     </div>
   );
 }
@@ -119,10 +163,12 @@ function Card({
   c,
   onUpdate,
   onRemove,
+  onDossier,
 }: {
   c: BoardCandidate;
   onUpdate: (patch: Partial<BoardCandidate>) => void;
   onRemove: () => void;
+  onDossier: () => void;
 }) {
   return (
     <div className="rounded-lg border border-ink/10 bg-white p-3 shadow-sm">
@@ -173,6 +219,16 @@ function Card({
           </button>
         </div>
       </div>
+      <button
+        onClick={onDossier}
+        className={`mt-2 w-full rounded-md border px-2 py-1 text-xs transition ${
+          c.dossier
+            ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+            : "border-ink/15 text-ink/60 hover:bg-paper"
+        }`}
+      >
+        {c.dossier ? "★ Досье собрано — открыть" : "Собрать OSINT-досье"}
+      </button>
     </div>
   );
 }

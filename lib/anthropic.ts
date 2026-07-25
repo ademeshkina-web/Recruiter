@@ -107,6 +107,40 @@ export async function generateWithWebSearch(
 }
 
 /**
+ * Извлечение текста резюме из документа (PDF/изображение) через нативный
+ * document-вход модели. Для .txt текст декодируется без модели (в роуте).
+ */
+export async function extractText(
+  system: string,
+  base64: string,
+  mediaType: string,
+): Promise<string> {
+  const c = getClient();
+  const params = {
+    model: MODEL,
+    max_tokens: 8000,
+    output_config: { effort: "low" },
+    system,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: mediaType, data: base64 } },
+          { type: "text", text: "Извлеки текст этого резюме." },
+        ],
+      },
+    ],
+  };
+  const res = await c.messages.create(
+    params as unknown as Anthropic.MessageCreateParamsNonStreaming,
+  );
+  if (res.stop_reason === "refusal") {
+    throw new Error("Модель отклонила запрос.");
+  }
+  return textFromContent(res.content);
+}
+
+/**
  * Устойчивый парсер JSON: снимает markdown-ограждения и вытаскивает
  * первый сбалансированный объект, если модель добавила пояснения.
  */
