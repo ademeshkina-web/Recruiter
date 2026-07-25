@@ -27,7 +27,34 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function Page() {
-  const store = usePositions();
+  const [auth, setAuth] = useState<{ email: string } | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled) setAuth(d && d.email ? { email: d.email } : null);
+      })
+      .catch(() => {
+        if (!cancelled) setAuth(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const store = usePositions(Boolean(auth));
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* noop */
+    }
+    setAuth(null);
+  }
+
   return (
     <main className="min-h-screen">
       <header className="border-b border-ink/10 bg-white">
@@ -40,7 +67,7 @@ export default function Page() {
           </button>
           <div className="flex items-center gap-3">
             <ModeBadge />
-            {store.current && (
+            {auth && store.current && (
               <button
                 onClick={() => store.setCurrentId(null)}
                 className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
@@ -48,12 +75,27 @@ export default function Page() {
                 ← Все позиции
               </button>
             )}
+            {auth && (
+              <>
+                <span className="hidden text-xs text-ink/50 sm:inline">{auth.email}</span>
+                <button
+                  onClick={logout}
+                  className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
+                >
+                  Выйти
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-6xl px-5 py-8">
-        {!store.ready ? (
+        {auth === undefined ? (
+          <div className="text-sm text-ink/40">Загрузка…</div>
+        ) : !auth ? (
+          <AuthScreen onAuthed={(email) => setAuth({ email })} />
+        ) : !store.ready ? (
           <div className="text-sm text-ink/40">Загрузка…</div>
         ) : store.current ? (
           <Workspace key={store.current.id} store={store} position={store.current} />
@@ -66,6 +108,93 @@ export default function Page() {
         Только публичная профессиональная информация, для легитимного найма.
       </footer>
     </main>
+  );
+}
+
+function AuthScreen({ onAuthed }: { onAuthed: (email: string) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [invite, setInvite] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function submit() {
+    setLoading(true);
+    setErr("");
+    try {
+      const res = await fetch(`/api/auth/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, invite }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Ошибка");
+      onAuthed(d.email);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-sm">
+      <div className="rounded-2xl border border-ink/10 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-ink">
+          {mode === "login" ? "Вход" : "Регистрация"}
+        </h2>
+        <p className="mt-1 text-sm text-ink/60">
+          {mode === "login"
+            ? "Войдите, чтобы работать со своими позициями."
+            : "Создайте аккаунт — ваши позиции будут доступны с любого устройства."}
+        </p>
+        <div className="mt-4 space-y-3">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="E-mail"
+            autoComplete="email"
+            className="w-full rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="Пароль (мин. 6 символов)"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            className="w-full rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+          {mode === "register" && (
+            <input
+              value={invite}
+              onChange={(e) => setInvite(e.target.value)}
+              placeholder="Код приглашения (если требуется)"
+              className="w-full rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          )}
+          <button
+            onClick={submit}
+            disabled={loading || !email || password.length < 6}
+            className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+          >
+            {loading ? "…" : mode === "login" ? "Войти" : "Зарегистрироваться"}
+          </button>
+          {err && <p className="text-sm text-red-600">{err}</p>}
+        </div>
+        <button
+          onClick={() => {
+            setMode(mode === "login" ? "register" : "login");
+            setErr("");
+          }}
+          className="mt-4 text-sm text-ink/50 underline underline-offset-2 hover:text-ink"
+        >
+          {mode === "login" ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти"}
+        </button>
+      </div>
+    </div>
   );
 }
 

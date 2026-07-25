@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSessionUserId } from "@/lib/auth";
 import { generateJson, hasApiKey } from "@/lib/anthropic";
 import { ANALYZE_SCHEMA, ANALYZE_SYSTEM, analyzeUser } from "@/lib/prompts";
 import { AnalyzeRequest, AnalyzeResult } from "@/lib/types";
@@ -8,6 +9,9 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
+  if (!getSessionUserId()) {
+    return NextResponse.json({ error: "Не авторизован." }, { status: 401 });
+  }
   let body: AnalyzeRequest;
   try {
     body = (await req.json()) as AnalyzeRequest;
