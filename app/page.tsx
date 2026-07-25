@@ -899,8 +899,13 @@ function CompareView({
     setUploadingIdx(i);
     try {
       const b64 = await fileToBase64(file);
-      const mediaType =
-        file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain");
+      const name = file.name.toLowerCase();
+      const byExt = name.endsWith(".pdf")
+        ? "application/pdf"
+        : name.endsWith(".docx")
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "text/plain";
+      const mediaType = file.type || byExt;
       const res = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -913,7 +918,7 @@ function CompareView({
         r.map((x, idx) =>
           idx === i
             ? {
-                name: x.name || file.name.replace(/\.(pdf|txt)$/i, ""),
+                name: x.name || file.name.replace(/\.(pdf|docx|txt)$/i, ""),
                 text: d.text || x.text,
               }
             : x,
@@ -967,10 +972,10 @@ function CompareView({
                 className="min-w-[180px] flex-1 rounded-lg border border-ink/15 px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
               <label className="cursor-pointer rounded-md border border-ink/15 px-2 py-1 text-xs text-ink/60 hover:bg-paper">
-                {uploadingIdx === i ? "Загружаю…" : "Загрузить PDF/TXT"}
+                {uploadingIdx === i ? "Загружаю…" : "Загрузить PDF/DOCX/TXT"}
                 <input
                   type="file"
-                  accept=".pdf,.txt,application/pdf,text/plain"
+                  accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
