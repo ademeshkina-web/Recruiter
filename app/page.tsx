@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
 import {
@@ -38,14 +38,17 @@ export default function Page() {
               Одна кнопка: бриф → вакансия, стратегия, каналы, кандидаты и доска подбора
             </p>
           </button>
-          {store.current && (
-            <button
-              onClick={() => store.setCurrentId(null)}
-              className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
-            >
-              ← Все позиции
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            <ModeBadge />
+            {store.current && (
+              <button
+                onClick={() => store.setCurrentId(null)}
+                className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
+              >
+                ← Все позиции
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -63,6 +66,32 @@ export default function Page() {
         Только публичная профессиональная информация, для легитимного найма.
       </footer>
     </main>
+  );
+}
+
+function ModeBadge() {
+  const [status, setStatus] = useState<{ live: boolean; model: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => setStatus({ live: false, model: "" }));
+  }, []);
+  if (!status) return null;
+  return (
+    <span
+      title={
+        status.live
+          ? `Живой режим · ${status.model}`
+          : "Демо-режим · задайте ANTHROPIC_API_KEY, чтобы работать с реальными брифами"
+      }
+      className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs sm:inline-flex ${
+        status.live ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${status.live ? "bg-green-500" : "bg-amber-500"}`} />
+      {status.live ? "Живой режим" : "Демо-режим"}
+    </span>
   );
 }
 

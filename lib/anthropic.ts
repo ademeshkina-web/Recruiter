@@ -2,14 +2,17 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
 
+// «Живой» режим включается, если есть ключ или OAuth-токен. Иначе — демо.
 export function hasApiKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 }
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!client) {
-    client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    client = process.env.ANTHROPIC_API_KEY
+      ? new Anthropic()
+      : new Anthropic({ authToken: process.env.ANTHROPIC_AUTH_TOKEN });
   }
   return client;
 }

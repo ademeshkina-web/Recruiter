@@ -63,10 +63,43 @@ components/
   Markdown.tsx        лёгкий рендер текста вакансии
 ```
 
-## Деплой
+## Как сделать «живым» (деплой)
 
-Приложение — обычный Next.js, разворачивается на Vercel или любом Node-хостинге.
-Задайте `ANTHROPIC_API_KEY` (и при желании `ANTHROPIC_MODEL`) в переменных окружения.
+Нужен только ваш `ANTHROPIC_API_KEY` (получить: <https://console.anthropic.com/>).
+Как только ключ задан в переменных окружения, в шапке загорается зелёный
+бейдж **«Живой режим»** и приложение работает с реальными брифами. Без ключа —
+жёлтый **«Демо-режим»**.
+
+### Вариант 1. Vercel (проще всего, ~3 минуты)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/ademeshkina-web/recruiter&env=ANTHROPIC_API_KEY&envDescription=Ключ%20Anthropic%20API&project-name=recruiter&repository-name=recruiter)
+
+1. Нажмите кнопку выше → войдите через GitHub.
+2. На шаге настройки вставьте `ANTHROPIC_API_KEY`.
+3. Deploy — получите публичную ссылку. Готово, это уже «живой» продукт.
+
+Позже ключ/модель меняются в *Project → Settings → Environment Variables*
+(`ANTHROPIC_MODEL` по желанию, по умолчанию `claude-opus-5`).
+
+> Веб-поиск кандидатов бывает дольше 60 сек. `vercel.json` уже поднимает лимит
+> функций до 300 сек — это доступно на плане Pro; на бесплатном плане поиск
+> кандидатов может обрываться по таймауту (остальное работает).
+
+### Вариант 2. Docker (любой сервер)
+
+```bash
+docker build -t recruiter .
+docker run -e ANTHROPIC_API_KEY=sk-ant-... -p 3000:3000 recruiter
+# http://localhost:3000
+```
+
+### Вариант 3. Любой Node-хостинг
+
+`npm run build` даёт standalone-сервер в `.next/standalone`. Запуск —
+`node .next/standalone/server.js` с заданными `ANTHROPIC_API_KEY` и `PORT`.
+
+**Проверка режима после деплоя:** откройте `/api/status` — вернёт
+`{"live":true,"model":"claude-opus-5"}`, если ключ подхватился.
 
 ## Этика OSINT
 
