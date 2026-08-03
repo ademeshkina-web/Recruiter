@@ -166,10 +166,38 @@ class PgStore implements Store {
     this.pool = pool;
   }
 
+  /**
+   * Запрос с одной повторной попыткой, если соединение не удалось установить.
+   * Канал до базы бывает трансграничным и иногда моргает: единичный сбой
+   * подключения не должен превращаться в ошибку на экране пользователя.
+   *
+   * Повторяем ТОЛЬКО сбои на этапе подключения — когда запрос заведомо не
+   * дошёл до сервера. Обрыв в середине запроса не повторяем: неизвестно,
+   * успел ли он выполниться, и повтор мог бы завести второго пользователя
+   * или продублировать запись.
+   */
+  private async q(text: string, values?: unknown[]) {
+    try {
+      return await this.pool.query(text, values as never);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // «timeout exceeded when trying to connect» — от пула pg;
+      // «connect ETIMEDOUT/ECONNREFUSED/...» — от Node на этапе установки TCP.
+      const beforeQuerySent =
+        /timeout exceeded when trying to connect|connect\s+(ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND)/i.test(
+          msg,
+        );
+      if (!beforeQuerySent) throw e;
+      console.warn("[db] не удалось подключиться, повтор:", msg);
+      await new Promise((r) => setTimeout(r, 400));
+      return await this.pool.query(text, values as never);
+    }
+  }
+
   init() {
     if (!this.ready) {
       this.ready = (async () => {
-        await this.pool.query(`
+        await this.q(`
           CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
@@ -178,13 +206,13 @@ class PgStore implements Store {
           );
         `);
         // Миграции колонок ролей/блокировки для уже существующих таблиц.
-        await this.pool.query(
+        await this.q(
           `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;`,
         );
-        await this.pool.query(
+        await this.q(
           `ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;`,
         );
-        await this.pool.query(`
+        await this.q(`
           CREATE TABLE IF NOT EXISTS positions (
             id TEXT NOT NULL,
             user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -210,14 +238,14 @@ class PgStore implements Store {
   }
 
   async getUserByEmail(email: string) {
-    const r = await this.pool.query(
+    const r = await this.q(
       "SELECT id, email, password_hash, is_admin, disabled, created_at FROM users WHERE email = $1",
       [email],
     );
     return r.rows[0] ? this.mapUser(r.rows[0]) : null;
   }
   async getUserById(id: string) {
-    const r = await this.pool.query(
+    const r = await this.q(
       "SELECT id, email, password_hash, is_admin, disabled, created_at FROM users WHERE id = $1",
       [id],
     );
@@ -226,7 +254,7 @@ class PgStore implements Store {
   async createUser(email: string, passwordHash: string) {
     const id = uid();
     try {
-      await this.pool.query(
+      await this.q(
         "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
         [id, email, passwordHash],
       );
@@ -245,14 +273,14 @@ class PgStore implements Store {
     };
   }
   async listPositions(userId: string) {
-    const r = await this.pool.query(
+    const r = await this.q(
       "SELECT data FROM positions WHERE user_id = $1 ORDER BY updated_at DESC",
       [userId],
     );
     return r.rows.map((row) => row.data as Position);
   }
   async upsertPosition(userId: string, position: Position) {
-    await this.pool.query(
+    await this.q(
       `INSERT INTO positions (id, user_id, data, updated_at)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
@@ -260,14 +288,14 @@ class PgStore implements Store {
     );
   }
   async deletePosition(userId: string, id: string) {
-    await this.pool.query("DELETE FROM positions WHERE user_id = $1 AND id = $2", [userId, id]);
+    await this.q("DELETE FROM positions WHERE user_id = $1 AND id = $2", [userId, id]);
   }
 
   async listUsersWithStats() {
-    const users = await this.pool.query(
+    const users = await this.q(
       "SELECT id, email, is_admin, disabled, created_at FROM users ORDER BY created_at ASC",
     );
-    const posRows = await this.pool.query("SELECT user_id, data FROM positions");
+    const posRows = await this.q("SELECT user_id, data FROM positions");
     const byUser = new Map<string, Position[]>();
     for (const row of posRows.rows) {
       const arr = byUser.get(row.user_id) || [];
@@ -285,17 +313,17 @@ class PgStore implements Store {
     }));
   }
   async setUserAdmin(userId: string, isAdmin: boolean) {
-    await this.pool.query("UPDATE users SET is_admin = $2 WHERE id = $1", [userId, isAdmin]);
+    await this.q("UPDATE users SET is_admin = $2 WHERE id = $1", [userId, isAdmin]);
   }
   async setUserDisabled(userId: string, disabled: boolean) {
-    await this.pool.query("UPDATE users SET disabled = $2 WHERE id = $1", [userId, disabled]);
+    await this.q("UPDATE users SET disabled = $2 WHERE id = $1", [userId, disabled]);
   }
   async setUserPassword(userId: string, passwordHash: string) {
-    await this.pool.query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, passwordHash]);
+    await this.q("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, passwordHash]);
   }
   async deleteUser(userId: string) {
     // positions удалятся каскадом (ON DELETE CASCADE).
-    await this.pool.query("DELETE FROM users WHERE id = $1", [userId]);
+    await this.q("DELETE FROM users WHERE id = $1", [userId]);
   }
 }
 
@@ -320,6 +348,18 @@ export function getStore(): Store {
       const pool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: process.env.PGSSL === "disable" ? undefined : { rejectUnauthorized: false },
+        // Приложение и база могут стоять в разных странах, и канал между ними
+        // иногда подтормаживает. Без явного таймаута зависшее TCP-соединение
+        // держит запрос до таймаута ОС — пользователь смотрит на крутилку
+        // полторы минуты и получает «Ошибка регистрации».
+        connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS || 8000),
+        idleTimeoutMillis: 30_000,
+        keepAlive: true,
+        max: 10,
+      });
+      // Иначе ошибка простаивающего соединения роняет процесс целиком.
+      pool.on("error", (e) => {
+        console.error("[db] соединение в пуле оборвалось:", e.message);
       });
       globalForStore.__recruiterStore = new PgStore(pool);
     } else {
