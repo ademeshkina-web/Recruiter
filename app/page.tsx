@@ -383,9 +383,13 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
   }
 
   async function runCandidates(aData: AnalyzeResult) {
-    const d = await postJson<CandidatesResult>("/api/candidates", {
-      context: buildContext(aData),
-    });
+    // Поиск — самая тяжёлая операция (до 12 веб-поисков); ждём дольше, чтобы
+    // клиент не оборвал запрос, пока сервер ещё собирает кандидатов.
+    const d = await postJson<CandidatesResult>(
+      "/api/candidates",
+      { context: buildContext(aData) },
+      480_000,
+    );
     store.update(position.id, { sourced: d });
     store.addCandidates(position.id, mapSourced(d));
     return d;
@@ -1111,14 +1115,18 @@ function CompareView({
     setLoading(true);
     setErr("");
     try {
+      // Структурированный (авторитетный) бриф шлём, ТОЛЬКО пока рекрутёр не
+      // тронул текстовое поле. Как только он его отредактировал — оцениваем по
+      // тому, что он видит (иначе был бы молчаливый рассинхрон: правит текст, а
+      // модель судит по исходному анализу).
+      const structuredActive = !!analyze && cbrief === defaultBrief;
       const d = await postJson<CompareResult>("/api/compare", {
         brief: cbrief,
         resumes: resumes.filter((r) => r.text.trim().length > 30),
-        // Авторитетный структурированный бриф из анализа — точный скоринг.
-        mustHave: analyze?.brief.must_have,
-        antiProfile: analyze?.brief.anti_profile,
-        roleFrame: analyze?.brief.role_frame,
-        keyTasks: analyze?.brief.key_tasks,
+        mustHave: structuredActive ? analyze!.brief.must_have : undefined,
+        antiProfile: structuredActive ? analyze!.brief.anti_profile : undefined,
+        roleFrame: structuredActive ? analyze!.brief.role_frame : undefined,
+        keyTasks: structuredActive ? analyze!.brief.key_tasks : undefined,
       });
       setData(d);
     } catch (e) {
@@ -1137,6 +1145,13 @@ function CompareView({
           rows={4}
           className="w-full resize-y rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
         />
+        {analyze && (
+          <p className="mt-2 text-xs text-ink/50">
+            {cbrief === defaultBrief
+              ? "Скоринг идёт строго по извлечённому брифу (must-have и анти-профиль из анализа)."
+              : "Бриф отредактирован — оценка пойдёт по этому тексту, а не по исходному анализу."}
+          </p>
+        )}
       </Card>
 
       <div className="space-y-3">

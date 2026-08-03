@@ -101,7 +101,10 @@ export interface CandidateEvaluation {
   strengths: string[];
   gaps: string[];
   must_have_match: MustHaveCheck[];
-  anti_profile_flags?: AntiProfileFlag[]; // совпадения со стоп-факторами
+  // Схема API делает поле обязательным (модель всегда вернёт массив, пусть пустой);
+  // опционально в типе — для обратной совместимости со старыми сохранёнными
+  // сравнениями, сделанными до появления анти-профиля.
+  anti_profile_flags?: AntiProfileFlag[];
   recommendation: string; // выводить / посмотреть / пропустить
 }
 
