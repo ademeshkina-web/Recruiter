@@ -172,6 +172,8 @@ export const OUTREACH_SCHEMA = {
   properties: {
     motivation_hypotheses: {
       type: "array",
+      minItems: 2,
+      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -186,6 +188,8 @@ export const OUTREACH_SCHEMA = {
     },
     messages: {
       type: "array",
+      minItems: 3,
+      maxItems: 3,
       items: {
         type: "object",
         additionalProperties: false,
