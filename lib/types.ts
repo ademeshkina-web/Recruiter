@@ -170,7 +170,18 @@ export interface OutreachMessage {
   text: string;
 }
 
+// Гипотеза мотивации кандидата и как под неё «зайти».
+export interface MotivationHypothesis {
+  motivation: string; // что вероятно движет (драйвер перехода)
+  basis: string; // на чём гипотеза (карьерный этап, ситуация, сигналы из досье)
+  approach: string; // как зайти: с каким акцентом открывать разговор
+  hook_text: string; // готовый текст-заход под эту мотивацию (1–2 фразы)
+}
+
 export interface OutreachResult {
+  // Гипотезы мотивации — опционально для обратной совместимости со старыми
+  // сохранёнными письмами, сделанными до появления блока.
+  motivation_hypotheses?: MotivationHypothesis[];
   messages: OutreachMessage[];
 }
 
