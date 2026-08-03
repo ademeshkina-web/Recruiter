@@ -40,6 +40,22 @@ export class EmailTakenError extends Error {
   }
 }
 
+/**
+ * База недоступна: не удалось установить соединение (канал до неё оборван).
+ * Отдельный тип нужен, чтобы роуты не показывали «Ошибка регистрации» —
+ * пользователь ничего не сделал не так, и повторять ввод бессмысленно.
+ */
+export class DbUnavailableError extends Error {
+  constructor(cause: string) {
+    super(cause);
+    this.name = "DbUnavailableError";
+  }
+}
+
+export const DB_UNAVAILABLE_TEXT =
+  "База данных сейчас недоступна — связь с ней временно потеряна. " +
+  "Данные целы, попробуйте через минуту.";
+
 export interface Store {
   init(): Promise<void>;
   getUserByEmail(email: string): Promise<DBUser | null>;
@@ -190,7 +206,12 @@ class PgStore implements Store {
       if (!beforeQuerySent) throw e;
       console.warn("[db] не удалось подключиться, повтор:", msg);
       await new Promise((r) => setTimeout(r, 400));
-      return await this.pool.query(text, values as never);
+      try {
+        return await this.pool.query(text, values as never);
+      } catch (again) {
+        // Повтор тоже не дошёл — это не ошибка пользователя, а обрыв связи.
+        throw new DbUnavailableError(again instanceof Error ? again.message : String(again));
+      }
     }
   }
 

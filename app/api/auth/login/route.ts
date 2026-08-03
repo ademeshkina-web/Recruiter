@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getStore } from "@/lib/db";
+import { getStore, DbUnavailableError, DB_UNAVAILABLE_TEXT } from "@/lib/db";
 import { sessionCookie, userIsAdmin, verifyPasswordConstantTime } from "@/lib/auth";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 import { clientIp, rateLimited } from "@/lib/ratelimit";
@@ -44,6 +44,9 @@ export async function POST(req: Request) {
     res.cookies.set(sessionCookie(user.id));
     return res;
   } catch (e) {
+    if (e instanceof DbUnavailableError) {
+      return NextResponse.json({ error: DB_UNAVAILABLE_TEXT }, { status: 503 });
+    }
     const msg = e instanceof Error ? e.message : "Ошибка входа.";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

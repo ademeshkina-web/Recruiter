@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getStore, EmailTakenError } from "@/lib/db";
+import { getStore, EmailTakenError, DbUnavailableError, DB_UNAVAILABLE_TEXT } from "@/lib/db";
 import { hashPassword, sessionCookie, userIsAdmin } from "@/lib/auth";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 import { clientIp, rateLimited } from "@/lib/ratelimit";
@@ -59,6 +59,9 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof EmailTakenError) {
       return NextResponse.json({ error: "Пользователь с таким e-mail уже есть." }, { status: 409 });
+    }
+    if (e instanceof DbUnavailableError) {
+      return NextResponse.json({ error: DB_UNAVAILABLE_TEXT }, { status: 503 });
     }
     return NextResponse.json({ error: "Ошибка регистрации." }, { status: 500 });
   }
