@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { getStore, DBUser } from "./db";
+import { isAdminEmail } from "./roles";
 
 const COOKIE = "rec_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 дней
@@ -84,13 +85,7 @@ export async function getSessionUser(): Promise<DBUser | null> {
 }
 
 // Админ = флаг is_admin в БД ИЛИ e-mail в списке ADMIN_EMAILS (стартовые админы).
-export function isAdminEmail(email: string): boolean {
-  return (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-    .includes(email.toLowerCase());
-}
+export { isAdminEmail } from "./roles";
 
 export function userIsAdmin(user: Pick<DBUser, "email" | "is_admin">): boolean {
   return user.is_admin || isAdminEmail(user.email);

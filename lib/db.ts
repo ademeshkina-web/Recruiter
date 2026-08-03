@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { Position, Stage, STAGES } from "./types";
+import { isAdminEmail } from "./roles";
 
 export interface DBUser {
   id: string;
@@ -130,7 +131,9 @@ class MemoryStore implements Store {
       .map((u) => ({
         id: u.id,
         email: u.email,
-        isAdmin: u.is_admin,
+        // Учитываем и флаг в БД, и ADMIN_EMAILS — иначе «корневой» админ выглядел
+        // бы обычным рекрутёром, и его могли бы по ошибке отключить/удалить.
+        isAdmin: u.is_admin || isAdminEmail(u.email),
         disabled: u.disabled,
         createdAt: u.created_at,
         stats: computeStats(Array.from(this.positions.get(u.id)?.values() || [])),
@@ -274,7 +277,8 @@ class PgStore implements Store {
     return users.rows.map((u) => ({
       id: u.id as string,
       email: u.email as string,
-      isAdmin: Boolean(u.is_admin),
+      // Флаг в БД ИЛИ ADMIN_EMAILS (см. пояснение в MemoryStore).
+      isAdmin: Boolean(u.is_admin) || isAdminEmail(u.email as string),
       disabled: Boolean(u.disabled),
       createdAt: u.created_at ? new Date(u.created_at as string).getTime() : 0,
       stats: computeStats(byUser.get(u.id as string) || []),

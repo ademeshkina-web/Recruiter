@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { getStore } from "@/lib/db";
 import { hashPassword, requireAdmin } from "@/lib/auth";
+import { isAdminEmail } from "@/lib/roles";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -37,6 +38,15 @@ export async function POST(req: Request) {
   await store.init();
   const target = await store.getUserById(userId);
   if (!target) return NextResponse.json({ error: "Пользователь не найден." }, { status: 404 });
+
+  // «Корневого» админа из ADMIN_EMAILS нельзя отключить, удалить или разжаловать
+  // (сброс пароля разрешён). Иначе другой админ мог бы случайно его вырубить.
+  if (action !== "resetPassword" && isAdminEmail(target.email)) {
+    return NextResponse.json(
+      { error: "Это защищённый администратор (ADMIN_EMAILS) — его нельзя отключить, удалить или разжаловать." },
+      { status: 400 },
+    );
+  }
 
   switch (action) {
     case "setAdmin":

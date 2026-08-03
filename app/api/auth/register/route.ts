@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { getStore, EmailTakenError } from "@/lib/db";
-import { hashPassword, sessionCookie } from "@/lib/auth";
+import { hashPassword, sessionCookie, userIsAdmin } from "@/lib/auth";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { clientIp, rateLimited } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  // Ограничение на спам регистраций: не более 10 с одного IP за 10 минут.
+  if (rateLimited("register:" + clientIp(req), 10, 10 * 60 * 1000)) {
+    return NextResponse.json(
+      { error: "Слишком много попыток. Попробуйте позже." },
+      { status: 429 },
+    );
+  }
+
   let body: { email?: string; password?: string; invite?: string };
   try {
     body = await readJsonLimited(req, 8 * 1024);
@@ -44,7 +53,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Пользователь с таким e-mail уже есть." }, { status: 409 });
     }
     const user = await store.createUser(email, await hashPassword(password));
-    const res = NextResponse.json({ email: user.email });
+    const res = NextResponse.json({ email: user.email, isAdmin: userIsAdmin(user) });
     res.cookies.set(sessionCookie(user.id));
     return res;
   } catch (e) {
