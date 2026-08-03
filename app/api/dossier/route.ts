@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { generateWithWebSearch, hasApiKey, parseJsonLoose } from "@/lib/anthropic";
+import {
+  DOSSIER_SEARCH_MAX_USES,
+  generateWithWebSearch,
+  hasApiKey,
+  parseJsonLoose,
+} from "@/lib/anthropic";
 import { DOSSIER_SYSTEM, dossierUser } from "@/lib/prompts";
 import { Dossier } from "@/lib/types";
 import { SAMPLE_DOSSIER } from "@/lib/sample";
@@ -33,7 +38,8 @@ export async function POST(req: Request) {
     const text = await generateWithWebSearch(
       DOSSIER_SYSTEM,
       dossierUser(name, body.role || "", body.context || ""),
-      12,
+      DOSSIER_SEARCH_MAX_USES,
+      "dossier",
     );
     const result = parseJsonLoose<Dossier>(text);
     return NextResponse.json(result);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { generateJson, hasApiKey } from "@/lib/anthropic";
+import { EFFORT, generateJson, hasApiKey } from "@/lib/anthropic";
 import { ANALYZE_SCHEMA, ANALYZE_SYSTEM, analyzeUser } from "@/lib/prompts";
 import { AnalyzeRequest, AnalyzeResult } from "@/lib/types";
 import { SAMPLE_ANALYZE } from "@/lib/sample";
@@ -36,7 +36,8 @@ export async function POST(req: Request) {
       ANALYZE_SYSTEM,
       analyzeUser(body.brief, body.company, body.role),
       ANALYZE_SCHEMA,
-      "high",
+      EFFORT,
+      "analyze",
     );
     return NextResponse.json(result);
   } catch (e) {

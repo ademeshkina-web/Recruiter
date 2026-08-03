@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BoardCandidate, Dossier, OutreachResult, Position, Stage, STAGES } from "@/lib/types";
 import { uid } from "@/lib/store";
 import { postJson } from "@/lib/client";
@@ -114,6 +114,12 @@ export default function Board({
     <div>
       <ManualAdd name={name} role={role} setName={setName} setRole={setRole} add={addManual} />
 
+      <PotokPanel
+        candidates={position.candidates}
+        dossierContext={dossierContext}
+        onUpdateCandidate={onUpdateCandidate}
+      />
+
       {position.candidates.length === 0 ? (
         <p className="mt-6 text-sm text-ink/50">
           Доска пуста. Добавляйте кандидатов кнопкой «+ на доску» на вкладках
@@ -180,6 +186,166 @@ export default function Board({
   );
 }
 
+interface PotokJob {
+  id: number;
+  name: string;
+}
+
+interface ExportResult {
+  candidateId: string;
+  name: string;
+  potokId?: number;
+  ok: boolean;
+  error?: string;
+  warning?: string;
+  dossier?: Dossier;
+}
+
+/**
+ * Выгрузка кандидатов с доски в ATS «Поток». Панель скрыта, если интеграция
+ * не настроена (нет POTOK_TOKEN) — тогда /api/potok/jobs отвечает 400.
+ */
+function PotokPanel({
+  candidates,
+  dossierContext,
+  onUpdateCandidate,
+}: {
+  candidates: BoardCandidate[];
+  dossierContext: string;
+  onUpdateCandidate: (candId: string, patch: Partial<BoardCandidate>) => void;
+}) {
+  const [jobs, setJobs] = useState<PotokJob[] | null>(null);
+  const [jobId, setJobId] = useState<string>("");
+  const [withDossier, setWithDossier] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/potok/jobs")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => alive && setJobs(d.jobs || []))
+      .catch(() => alive && setJobs(null));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const pending = candidates.filter((c) => !c.potokId);
+  const needDossier = pending.filter((c) => !c.dossier).length;
+
+  const send = useCallback(
+    async (list: BoardCandidate[]) => {
+      if (list.length === 0 || busy) return;
+      setBusy(true);
+      setMsg("");
+      setErr("");
+      try {
+        const d = await postJson<{
+          results: ExportResult[];
+          sent: number;
+          failed: number;
+          dossiersCollected: number;
+        }>("/api/potok/export", {
+          candidates: list,
+          jobId: jobId ? Number(jobId) : undefined,
+          context: dossierContext,
+          withDossier,
+        });
+
+        for (const r of d.results || []) {
+          const patch: Partial<BoardCandidate> = {};
+          if (r.ok && r.potokId) patch.potokId = r.potokId;
+          if (r.dossier) patch.dossier = r.dossier; // не платить за досье дважды
+          if (Object.keys(patch).length) onUpdateCandidate(r.candidateId, patch);
+        }
+
+        const parts = [`Выгружено в Поток: ${d.sent ?? 0}`];
+        if (d.dossiersCollected) parts.push(`собрано досье: ${d.dossiersCollected}`);
+        setMsg(parts.join(", ") + ".");
+
+        const bad = (d.results || []).filter((r) => !r.ok || r.warning);
+        if (bad.length) {
+          setErr(
+            bad
+              .map((f) => `${f.name} — ${f.error || f.warning}`)
+              .join("; "),
+          );
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Ошибка выгрузки");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, jobId, dossierContext, withDossier, onUpdateCandidate],
+  );
+
+  // Интеграция не настроена или Поток недоступен — панель не мешается.
+  if (jobs === null) return null;
+
+  return (
+    <div className="mt-3 rounded-xl border border-ink/10 bg-paper/60 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-ink">ATS «Поток»</span>
+        <select
+          value={jobId}
+          onChange={(e) => setJobId(e.target.value)}
+          className="min-w-[220px] rounded-lg border border-ink/15 bg-white px-2 py-1.5 text-sm text-ink/80 outline-none focus:border-accent"
+        >
+          <option value="">Без привязки к вакансии</option>
+          {jobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.name}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => send(pending)}
+          disabled={busy || pending.length === 0}
+          className="rounded-lg bg-accent px-3 py-1.5 text-sm text-white transition hover:opacity-90 disabled:opacity-40"
+        >
+          {busy ? "Выгружаю…" : `Выгрузить в Поток (${pending.length})`}
+        </button>
+        {candidates.length > pending.length && (
+          <span className="text-xs text-ink/50">
+            уже в Потоке: {candidates.length - pending.length}
+          </span>
+        )}
+      </div>
+
+      <label className="mt-2 flex items-start gap-2 text-xs text-ink/70">
+        <input
+          type="checkbox"
+          checked={withDossier}
+          onChange={(e) => setWithDossier(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          Собирать OSINT-досье тем, у кого его нет
+          {withDossier && needDossier > 0 && (
+            <b className="text-ink"> — сейчас это {needDossier} чел.</b>
+          )}
+          <br />
+          <span className="text-ink/50">
+            Досье — самая долгая и дорогая операция (веб-поиск по каждому человеку).
+            Готовые досье не пересобираются, а собранные здесь сохранятся на доске.
+          </span>
+        </span>
+      </label>
+
+      <p className="mt-1.5 text-xs text-ink/50">
+        Кандидаты заводятся как найденные прямым поиском (source_type: sourced). В карточку
+        попадают публичные ссылки, находки досье с датами и источниками, красные флаги,
+        вывод для ГД и ваша заметка.
+      </p>
+      {msg && <p className="mt-1.5 text-xs text-green-700">{msg}</p>}
+      {err && <p className="mt-1.5 text-xs text-red-600">{err}</p>}
+    </div>
+  );
+}
+
 function ManualAdd({
   name,
   role,
@@ -234,11 +400,19 @@ function Card({
     <div className="rounded-lg border border-ink/10 bg-white p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="text-sm font-semibold text-ink">{c.name}</div>
-        {typeof c.score === "number" && (
-          <span className="shrink-0 rounded bg-accentsoft px-1.5 text-xs text-ink/70">
-            {c.score}
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {c.potokId && (
+            <SafeLink
+              url={`https://app.potok.io/applicants/${c.potokId}`}
+              className="rounded bg-green-100 px-1.5 text-xs text-green-700"
+            >
+              Поток ✓
+            </SafeLink>
+          )}
+          {typeof c.score === "number" && (
+            <span className="rounded bg-accentsoft px-1.5 text-xs text-ink/70">{c.score}</span>
+          )}
+        </div>
       </div>
       {c.role && <div className="mt-0.5 text-xs text-ink/60">{c.role}</div>}
       <input

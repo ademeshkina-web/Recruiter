@@ -1,6 +1,32 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { addUsage, logUsage, RawUsage } from "./usage";
 
 export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
+
+/**
+ * Модель для лёгких задач (извлечение текста из резюме, письма для аутрича,
+ * сравнение резюме). По умолчанию — та же, но её можно удешевить отдельно,
+ * не трогая качество главного анализа брифа.
+ */
+export const LIGHT_MODEL = process.env.ANTHROPIC_LIGHT_MODEL || MODEL;
+
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * Глубина размышлений модели. Замеры: high → medium даёт ~10% экономии при
+ * неотличимом качестве, low → ~24%, но заметно короче ответ.
+ */
+export const EFFORT: Effort = (process.env.ANTHROPIC_EFFORT as Effort) || "medium";
+
+/**
+ * Сколько раз модели разрешено сходить в веб-поиск за один запрос.
+ * Каждый поиск — это и плата за сам запрос, и объёмные результаты,
+ * которые дальше оплачиваются как входные токены на каждой итерации.
+ */
+export const WEB_SEARCH_MAX_USES = Number(process.env.WEB_SEARCH_MAX_USES || 12);
+
+/** Досье глубже лонг-листа, поэтому поисков больше — но тоже с потолком. */
+export const DOSSIER_SEARCH_MAX_USES = Number(process.env.DOSSIER_SEARCH_MAX_USES || 8);
 
 // «Живой» режим включается, если есть ключ или OAuth-токен. Иначе — демо.
 export function hasApiKey(): boolean {
@@ -50,14 +76,20 @@ export function mapModelError(e: unknown): Error {
   return e instanceof Error ? e : new Error(String(e));
 }
 
-type Effort = "low" | "medium" | "high" | "xhigh" | "max";
-
 function textFromContent(content: Anthropic.ContentBlock[]): string {
   return content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("\n")
     .trim();
+}
+
+/**
+ * Системный промпт как кэшируемый блок: он одинаков от запроса к запросу,
+ * поэтому со второго вызова оплачивается по 0.1× вместо полной цены входа.
+ */
+function cachedSystem(system: string) {
+  return [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
 }
 
 /**
@@ -68,17 +100,20 @@ export async function generateJson<T>(
   system: string,
   user: string,
   schema: Record<string, unknown>,
-  effort: Effort = "high",
+  effort: Effort = EFFORT,
+  label = "generateJson",
+  model: string = MODEL,
 ): Promise<T> {
   const c = getClient();
+  const started = Date.now();
   // SDK-типы этой версии не знают adaptive thinking / output_config,
   // но поля пробрасываются в запрос к API как есть.
   const params = {
-    model: MODEL,
+    model,
     max_tokens: 32000,
     thinking: { type: "adaptive" },
     output_config: { effort, format: { type: "json_schema", schema } },
-    system,
+    system: cachedSystem(system),
     messages: [{ role: "user", content: user }],
   };
   let message;
@@ -93,6 +128,8 @@ export async function generateJson<T>(
     throw new Error("Модель отклонила запрос по соображениям безопасности.");
   }
 
+  logUsage(label, model, effort, message.usage as RawUsage, (Date.now() - started) / 1000);
+
   const text = textFromContent(message.content);
   return parseJsonLoose<T>(text);
 }
@@ -100,35 +137,41 @@ export async function generateJson<T>(
 /**
  * Генерация с веб-поиском (OSINT по открытым источникам).
  * Обрабатываем pause_turn (серверный лимит итераций инструмента).
+ *
+ * Цикл дорогой: на каждой итерации весь накопленный диалог (включая результаты
+ * поиска — а они объёмные) отправляется заново. Поэтому ставим точку кэша на
+ * последний блок — повторный вход оплачивается по 0.1×. На замере это дало
+ * 40% экономии от стоимости вызова.
  */
 export async function generateWithWebSearch(
   system: string,
   user: string,
-  maxUses = 8,
+  maxUses = WEB_SEARCH_MAX_USES,
+  label = "webSearch",
+  effort: Effort = EFFORT,
 ): Promise<string> {
   const c = getClient();
-  const tools = [
-    { type: "web_search_20260209", name: "web_search", max_uses: maxUses },
-  ];
+  const started = Date.now();
+  const tools = [{ type: "web_search_20260209", name: "web_search", max_uses: maxUses }];
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: user }];
 
   let lastText = "";
+  let total: RawUsage = {};
+
   for (let i = 0; i < 6; i++) {
     const params = {
       model: MODEL,
       max_tokens: 16000,
       thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
-      system,
+      output_config: { effort },
+      system: cachedSystem(system),
       tools,
       messages,
     };
     let res;
     try {
-      res = await c.messages.create(
-        params as unknown as Anthropic.MessageCreateParamsNonStreaming,
-      );
+      res = await c.messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming);
     } catch (e) {
       throw mapModelError(e);
     }
@@ -137,15 +180,36 @@ export async function generateWithWebSearch(
       throw new Error("Модель отклонила запрос по соображениям безопасности.");
     }
 
+    total = addUsage(total, res.usage as RawUsage);
     lastText = textFromContent(res.content);
 
     if (res.stop_reason === "pause_turn") {
-      messages.push({ role: "assistant", content: res.content });
+      messages.push({ role: "assistant", content: markLastForCache(res.content) });
       continue; // сервер продолжит инструментальный цикл
     }
     break;
   }
+
+  logUsage(label, MODEL, effort, total, (Date.now() - started) / 1000);
   return lastText;
+}
+
+/**
+ * Ставит точку кэширования на последний блок сообщения. Разрешено максимум
+ * 4 точки на запрос, поэтому держим ровно одну — на самом свежем блоке:
+ * она покрывает весь диалог до неё.
+ */
+function markLastForCache(content: Anthropic.ContentBlock[]): Anthropic.ContentBlock[] {
+  if (!content.length) return content;
+  const copy = content.map((b) => {
+    const { cache_control, ...rest } = b as unknown as Record<string, unknown>;
+    return rest;
+  });
+  copy[copy.length - 1] = {
+    ...copy[copy.length - 1],
+    cache_control: { type: "ephemeral" },
+  };
+  return copy as unknown as Anthropic.ContentBlock[];
 }
 
 /**
@@ -158,8 +222,9 @@ export async function extractText(
   mediaType: string,
 ): Promise<string> {
   const c = getClient();
+  const started = Date.now();
   const params = {
-    model: MODEL,
+    model: LIGHT_MODEL,
     max_tokens: 8000,
     output_config: { effort: "low" },
     system,
@@ -175,15 +240,14 @@ export async function extractText(
   };
   let res;
   try {
-    res = await c.messages.create(
-      params as unknown as Anthropic.MessageCreateParamsNonStreaming,
-    );
+    res = await c.messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming);
   } catch (e) {
     throw mapModelError(e);
   }
   if (res.stop_reason === "refusal") {
     throw new Error("Модель отклонила запрос.");
   }
+  logUsage("extract", LIGHT_MODEL, "low", res.usage as RawUsage, (Date.now() - started) / 1000);
   return textFromContent(res.content);
 }
 

@@ -196,6 +196,7 @@ export interface BoardCandidate {
   addedFrom: "osint" | "compare" | "manual";
   dossier?: Dossier; // глубокий OSINT-разбор, если собран
   outreach?: OutreachResult; // сгенерированные письма для аутрича
+  potokId?: number; // id кандидата в ATS «Поток», если уже выгружен
   createdAt: number;
 }
 

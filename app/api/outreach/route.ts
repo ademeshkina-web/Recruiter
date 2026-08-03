@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { generateJson, hasApiKey } from "@/lib/anthropic";
+import { generateJson, hasApiKey, LIGHT_MODEL } from "@/lib/anthropic";
 import { OUTREACH_SCHEMA, OUTREACH_SYSTEM, outreachUser } from "@/lib/prompts";
 import { OutreachResult } from "@/lib/types";
 import { SAMPLE_OUTREACH } from "@/lib/sample";
@@ -35,7 +35,11 @@ export async function POST(req: Request) {
       OUTREACH_SYSTEM,
       outreachUser(name, body.role || "", body.context || "", body.dossierSummary || ""),
       OUTREACH_SCHEMA,
-      "medium",
+      // Три коротких письма по готовому контексту — глубокие размышления тут
+      // ничего не добавляют, а стоят как выходные токены.
+      "low",
+      "outreach",
+      LIGHT_MODEL,
     );
     return NextResponse.json(result);
   } catch (e) {

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { generateWithWebSearch, hasApiKey, parseJsonLoose } from "@/lib/anthropic";
+import {
+  generateWithWebSearch,
+  hasApiKey,
+  parseJsonLoose,
+  WEB_SEARCH_MAX_USES,
+} from "@/lib/anthropic";
 import { CANDIDATES_SYSTEM, candidatesUser } from "@/lib/prompts";
 import { CandidatesResult } from "@/lib/types";
 import { SAMPLE_CANDIDATES } from "@/lib/sample";
@@ -33,7 +38,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    const text = await generateWithWebSearch(CANDIDATES_SYSTEM, candidatesUser(context), 12);
+    const text = await generateWithWebSearch(
+      CANDIDATES_SYSTEM,
+      candidatesUser(context),
+      WEB_SEARCH_MAX_USES,
+      "candidates",
+    );
     const result = parseJsonLoose<CandidatesResult>(text);
     return NextResponse.json(result);
   } catch (e) {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { generateJson, hasApiKey } from "@/lib/anthropic";
+import { EFFORT, generateJson, hasApiKey, LIGHT_MODEL } from "@/lib/anthropic";
 import { COMPARE_SCHEMA, COMPARE_SYSTEM, compareUser } from "@/lib/prompts";
 import { CompareRequest, CompareResult } from "@/lib/types";
 import { SAMPLE_COMPARE } from "@/lib/sample";
@@ -50,7 +50,9 @@ export async function POST(req: Request) {
         keyTasks: Array.isArray(body.keyTasks) ? body.keyTasks : undefined,
       }),
       COMPARE_SCHEMA,
-      "high",
+      EFFORT,
+      "compare",
+      LIGHT_MODEL,
     );
     result.ranking.sort((a, b) => b.score - a.score);
     return NextResponse.json(result);
