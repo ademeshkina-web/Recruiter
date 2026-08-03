@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/lib/db";
-import { getSessionUserId } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
 import { Position } from "@/lib/types";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
@@ -12,17 +12,17 @@ function unauthorized() {
 }
 
 export async function GET() {
-  const userId = getSessionUserId();
-  if (!userId) return unauthorized();
+  const user = await getSessionUser();
+  if (!user) return unauthorized();
   const store = getStore();
   await store.init();
-  const positions = await store.listPositions(userId);
+  const positions = await store.listPositions(user.id);
   return NextResponse.json({ positions });
 }
 
 export async function PUT(req: Request) {
-  const userId = getSessionUserId();
-  if (!userId) return unauthorized();
+  const user = await getSessionUser();
+  if (!user) return unauthorized();
   let body: { position?: Position };
   try {
     body = await readJsonLimited(req, 1024 * 1024);
@@ -37,17 +37,17 @@ export async function PUT(req: Request) {
   }
   const store = getStore();
   await store.init();
-  await store.upsertPosition(userId, p);
+  await store.upsertPosition(user.id, p);
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: Request) {
-  const userId = getSessionUserId();
-  if (!userId) return unauthorized();
+  const user = await getSessionUser();
+  if (!user) return unauthorized();
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Нет id." }, { status: 400 });
   const store = getStore();
   await store.init();
-  await store.deletePosition(userId, id);
+  await store.deletePosition(user.id, id);
   return NextResponse.json({ ok: true });
 }

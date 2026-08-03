@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUserId } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
 import { generateJson, hasApiKey } from "@/lib/anthropic";
 import { COMPARE_SCHEMA, COMPARE_SYSTEM, compareUser } from "@/lib/prompts";
 import { CompareRequest, CompareResult } from "@/lib/types";
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-  if (!getSessionUserId()) {
+  if (!(await getSessionUser())) {
     return NextResponse.json({ error: "Не авторизован." }, { status: 401 });
   }
   let body: CompareRequest;

@@ -1,10 +1,33 @@
 import type { Pool } from "pg";
-import { Position } from "./types";
+import { Position, Stage, STAGES } from "./types";
 
 export interface DBUser {
   id: string;
   email: string;
   password_hash: string;
+  is_admin: boolean;
+  disabled: boolean;
+  created_at: number; // ms epoch
+}
+
+// Активность рекрутёра — считается из его позиций (JSONB), без отдельных полей.
+export interface RecruiterStats {
+  positions: number;
+  candidates: number;
+  byStage: Record<Stage, number>;
+  dossiers: number;
+  outreach: number;
+  lastActivity: number; // ms, 0 если активности нет
+}
+
+// Строка для админки: пользователь + его активность (без password_hash).
+export interface AdminUser {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  disabled: boolean;
+  createdAt: number;
+  stats: RecruiterStats;
 }
 
 // Бросается, когда e-mail уже занят. Роут регистрации ловит и отдаёт 409
@@ -24,6 +47,12 @@ export interface Store {
   listPositions(userId: string): Promise<Position[]>;
   upsertPosition(userId: string, position: Position): Promise<void>;
   deletePosition(userId: string, id: string): Promise<void>;
+  // --- админ ---
+  listUsersWithStats(): Promise<AdminUser[]>;
+  setUserAdmin(userId: string, isAdmin: boolean): Promise<void>;
+  setUserDisabled(userId: string, disabled: boolean): Promise<void>;
+  setUserPassword(userId: string, passwordHash: string): Promise<void>;
+  deleteUser(userId: string): Promise<void>;
 }
 
 function uid(): string {
@@ -32,6 +61,25 @@ function uid(): string {
     Date.now().toString(36).slice(-4) +
     Math.random().toString(36).slice(2, 6)
   );
+}
+
+// Считает активность рекрутёра из его позиций.
+function computeStats(positions: Position[]): RecruiterStats {
+  const byStage = Object.fromEntries(STAGES.map((s) => [s.id, 0])) as Record<Stage, number>;
+  let candidates = 0;
+  let dossiers = 0;
+  let outreach = 0;
+  let lastActivity = 0;
+  for (const p of positions) {
+    if (p.updatedAt > lastActivity) lastActivity = p.updatedAt;
+    for (const c of p.candidates || []) {
+      candidates++;
+      if (c.stage && byStage[c.stage] !== undefined) byStage[c.stage]++;
+      if (c.dossier) dossiers++;
+      if (c.outreach) outreach++;
+    }
+  }
+  return { positions: positions.length, candidates, byStage, dossiers, outreach, lastActivity };
 }
 
 // ---- In-memory (dev / без DATABASE_URL). Данные живут до перезапуска. ----
@@ -51,7 +99,14 @@ class MemoryStore implements Store {
     // Проверка и вставка — синхронно, без await между ними, поэтому атомарны
     // в одном потоке Node: параллельные регистрации не создадут дубль.
     for (const u of this.users.values()) if (u.email === email) throw new EmailTakenError();
-    const u: DBUser = { id: uid(), email, password_hash: passwordHash };
+    const u: DBUser = {
+      id: uid(),
+      email,
+      password_hash: passwordHash,
+      is_admin: false,
+      disabled: false,
+      created_at: Date.now(),
+    };
     this.users.set(u.id, u);
     this.positions.set(u.id, new Map());
     return u;
@@ -67,6 +122,35 @@ class MemoryStore implements Store {
   }
   async deletePosition(userId: string, id: string) {
     this.positions.get(userId)?.delete(id);
+  }
+
+  async listUsersWithStats() {
+    return Array.from(this.users.values())
+      .sort((a, b) => a.created_at - b.created_at)
+      .map((u) => ({
+        id: u.id,
+        email: u.email,
+        isAdmin: u.is_admin,
+        disabled: u.disabled,
+        createdAt: u.created_at,
+        stats: computeStats(Array.from(this.positions.get(u.id)?.values() || [])),
+      }));
+  }
+  async setUserAdmin(userId: string, isAdmin: boolean) {
+    const u = this.users.get(userId);
+    if (u) u.is_admin = isAdmin;
+  }
+  async setUserDisabled(userId: string, disabled: boolean) {
+    const u = this.users.get(userId);
+    if (u) u.disabled = disabled;
+  }
+  async setUserPassword(userId: string, passwordHash: string) {
+    const u = this.users.get(userId);
+    if (u) u.password_hash = passwordHash;
+  }
+  async deleteUser(userId: string) {
+    this.users.delete(userId);
+    this.positions.delete(userId);
   }
 }
 
@@ -90,6 +174,13 @@ class PgStore implements Store {
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
           );
         `);
+        // Миграции колонок ролей/блокировки для уже существующих таблиц.
+        await this.pool.query(
+          `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;`,
+        );
+        await this.pool.query(
+          `ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;`,
+        );
         await this.pool.query(`
           CREATE TABLE IF NOT EXISTS positions (
             id TEXT NOT NULL,
@@ -104,19 +195,30 @@ class PgStore implements Store {
     return this.ready;
   }
 
+  private mapUser(row: Record<string, unknown>): DBUser {
+    return {
+      id: row.id as string,
+      email: row.email as string,
+      password_hash: row.password_hash as string,
+      is_admin: Boolean(row.is_admin),
+      disabled: Boolean(row.disabled),
+      created_at: row.created_at ? new Date(row.created_at as string).getTime() : 0,
+    };
+  }
+
   async getUserByEmail(email: string) {
     const r = await this.pool.query(
-      "SELECT id, email, password_hash FROM users WHERE email = $1",
+      "SELECT id, email, password_hash, is_admin, disabled, created_at FROM users WHERE email = $1",
       [email],
     );
-    return r.rows[0] || null;
+    return r.rows[0] ? this.mapUser(r.rows[0]) : null;
   }
   async getUserById(id: string) {
     const r = await this.pool.query(
-      "SELECT id, email, password_hash FROM users WHERE id = $1",
+      "SELECT id, email, password_hash, is_admin, disabled, created_at FROM users WHERE id = $1",
       [id],
     );
-    return r.rows[0] || null;
+    return r.rows[0] ? this.mapUser(r.rows[0]) : null;
   }
   async createUser(email: string, passwordHash: string) {
     const id = uid();
@@ -130,7 +232,14 @@ class PgStore implements Store {
       if ((e as { code?: string }).code === "23505") throw new EmailTakenError();
       throw e;
     }
-    return { id, email, password_hash: passwordHash };
+    return {
+      id,
+      email,
+      password_hash: passwordHash,
+      is_admin: false,
+      disabled: false,
+      created_at: Date.now(),
+    };
   }
   async listPositions(userId: string) {
     const r = await this.pool.query(
@@ -149,6 +258,40 @@ class PgStore implements Store {
   }
   async deletePosition(userId: string, id: string) {
     await this.pool.query("DELETE FROM positions WHERE user_id = $1 AND id = $2", [userId, id]);
+  }
+
+  async listUsersWithStats() {
+    const users = await this.pool.query(
+      "SELECT id, email, is_admin, disabled, created_at FROM users ORDER BY created_at ASC",
+    );
+    const posRows = await this.pool.query("SELECT user_id, data FROM positions");
+    const byUser = new Map<string, Position[]>();
+    for (const row of posRows.rows) {
+      const arr = byUser.get(row.user_id) || [];
+      arr.push(row.data as Position);
+      byUser.set(row.user_id, arr);
+    }
+    return users.rows.map((u) => ({
+      id: u.id as string,
+      email: u.email as string,
+      isAdmin: Boolean(u.is_admin),
+      disabled: Boolean(u.disabled),
+      createdAt: u.created_at ? new Date(u.created_at as string).getTime() : 0,
+      stats: computeStats(byUser.get(u.id as string) || []),
+    }));
+  }
+  async setUserAdmin(userId: string, isAdmin: boolean) {
+    await this.pool.query("UPDATE users SET is_admin = $2 WHERE id = $1", [userId, isAdmin]);
+  }
+  async setUserDisabled(userId: string, disabled: boolean) {
+    await this.pool.query("UPDATE users SET disabled = $2 WHERE id = $1", [userId, disabled]);
+  }
+  async setUserPassword(userId: string, passwordHash: string) {
+    await this.pool.query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, passwordHash]);
+  }
+  async deleteUser(userId: string) {
+    // positions удалятся каскадом (ON DELETE CASCADE).
+    await this.pool.query("DELETE FROM users WHERE id = $1", [userId]);
   }
 }
 

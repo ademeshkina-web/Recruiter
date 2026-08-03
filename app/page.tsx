@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
 import { SafeLink } from "@/components/SafeLink";
+import AdminScreen from "@/components/Admin";
 import { postJson } from "@/lib/client";
 import {
   AnalyzeResult,
@@ -28,15 +29,18 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "board", label: "Доска" },
 ];
 
+type Auth = { email: string; isAdmin: boolean };
+
 export default function Page() {
-  const [auth, setAuth] = useState<{ email: string } | null | undefined>(undefined);
+  const [auth, setAuth] = useState<Auth | null | undefined>(undefined);
+  const [showAdmin, setShowAdmin] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!cancelled) setAuth(d && d.email ? { email: d.email } : null);
+        if (!cancelled) setAuth(d && d.email ? { email: d.email, isAdmin: Boolean(d.isAdmin) } : null);
       })
       .catch(() => {
         if (!cancelled) setAuth(null);
@@ -69,12 +73,20 @@ export default function Page() {
           </button>
           <div className="flex items-center gap-3">
             <ModeBadge />
-            {auth && store.current && (
+            {auth && !showAdmin && store.current && (
               <button
                 onClick={() => store.setCurrentId(null)}
                 className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
               >
                 ← Все позиции
+              </button>
+            )}
+            {auth?.isAdmin && (
+              <button
+                onClick={() => setShowAdmin((v) => !v)}
+                className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper"
+              >
+                {showAdmin ? "← В работу" : "Админка"}
               </button>
             )}
             {auth && (
@@ -96,7 +108,9 @@ export default function Page() {
         {auth === undefined ? (
           <div className="text-sm text-ink/40">Загрузка…</div>
         ) : !auth ? (
-          <AuthScreen onAuthed={(email) => setAuth({ email })} />
+          <AuthScreen onAuthed={(a) => setAuth(a)} />
+        ) : showAdmin && auth.isAdmin ? (
+          <AdminScreen />
         ) : !store.ready ? (
           <div className="text-sm text-ink/40">Загрузка…</div>
         ) : store.current ? (
@@ -113,7 +127,7 @@ export default function Page() {
   );
 }
 
-function AuthScreen({ onAuthed }: { onAuthed: (email: string) => void }) {
+function AuthScreen({ onAuthed }: { onAuthed: (a: Auth) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -132,7 +146,7 @@ function AuthScreen({ onAuthed }: { onAuthed: (email: string) => void }) {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Ошибка");
-      onAuthed(d.email);
+      onAuthed({ email: d.email, isAdmin: Boolean(d.isAdmin) });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Ошибка");
     } finally {

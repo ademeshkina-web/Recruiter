@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUserId } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
 import { generateJson, hasApiKey } from "@/lib/anthropic";
 import { OUTREACH_SCHEMA, OUTREACH_SYSTEM, outreachUser } from "@/lib/prompts";
 import { OutreachResult } from "@/lib/types";
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-  if (!getSessionUserId()) {
+  if (!(await getSessionUser())) {
     return NextResponse.json({ error: "Не авторизован." }, { status: 401 });
   }
   let body: { name?: string; role?: string; context?: string; dossierSummary?: string };

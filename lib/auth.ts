@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
+import { getStore, DBUser } from "./db";
 
 const COOKIE = "rec_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 дней
@@ -63,10 +64,43 @@ export function verifyToken(token: string | undefined): string | null {
   return Buffer.from(payload, "base64url").toString("utf-8");
 }
 
-// Прочитать текущего пользователя из cookie (в route handlers).
+// Прочитать id текущего пользователя из cookie (только проверка подписи, без БД).
 export function getSessionUserId(): string | null {
   const token = cookies().get(COOKIE)?.value;
   return verifyToken(token);
+}
+
+// Загрузить текущего пользователя из БД. Возвращает null, если сессии нет, либо
+// пользователь удалён или заблокирован — так «отзыв доступа» действует сразу,
+// не дожидаясь истечения cookie.
+export async function getSessionUser(): Promise<DBUser | null> {
+  const id = getSessionUserId();
+  if (!id) return null;
+  const store = getStore();
+  await store.init();
+  const user = await store.getUserById(id);
+  if (!user || user.disabled) return null;
+  return user;
+}
+
+// Админ = флаг is_admin в БД ИЛИ e-mail в списке ADMIN_EMAILS (стартовые админы).
+export function isAdminEmail(email: string): boolean {
+  return (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email.toLowerCase());
+}
+
+export function userIsAdmin(user: Pick<DBUser, "email" | "is_admin">): boolean {
+  return user.is_admin || isAdminEmail(user.email);
+}
+
+// Требует админ-сессию: возвращает пользователя-админа или null.
+export async function requireAdmin(): Promise<DBUser | null> {
+  const user = await getSessionUser();
+  if (!user || !userIsAdmin(user)) return null;
+  return user;
 }
 
 export function sessionCookie(userId: string) {

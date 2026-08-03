@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/lib/db";
-import { sessionCookie, verifyPasswordConstantTime } from "@/lib/auth";
+import { sessionCookie, userIsAdmin, verifyPasswordConstantTime } from "@/lib/auth";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -27,7 +27,10 @@ export async function POST(req: Request) {
     if (!user || !ok) {
       return NextResponse.json({ error: "Неверный e-mail или пароль." }, { status: 401 });
     }
-    const res = NextResponse.json({ email: user.email });
+    if (user.disabled) {
+      return NextResponse.json({ error: "Доступ отключён администратором." }, { status: 403 });
+    }
+    const res = NextResponse.json({ email: user.email, isAdmin: userIsAdmin(user) });
     res.cookies.set(sessionCookie(user.id));
     return res;
   } catch (e) {
