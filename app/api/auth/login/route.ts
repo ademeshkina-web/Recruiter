@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/lib/db";
-import { sessionCookie, verifyPasswordConstantTime } from "@/lib/auth";
+import { sessionCookie, userIsAdmin, verifyPasswordConstantTime } from "@/lib/auth";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { clientIp, rateLimited } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  // Защита от перебора паролей: не более 20 попыток входа с IP за 10 минут.
+  // Лимит по IP (а не по e-mail), чтобы нельзя было залочить чужую учётку.
+  if (rateLimited("login:" + clientIp(req), 20, 10 * 60 * 1000)) {
+    return NextResponse.json(
+      { error: "Слишком много попыток входа. Попробуйте через несколько минут." },
+      { status: 429 },
+    );
+  }
+
   let body: { email?: string; password?: string };
   try {
     body = await readJsonLimited(req, 8 * 1024);
@@ -27,7 +37,10 @@ export async function POST(req: Request) {
     if (!user || !ok) {
       return NextResponse.json({ error: "Неверный e-mail или пароль." }, { status: 401 });
     }
-    const res = NextResponse.json({ email: user.email });
+    if (user.disabled) {
+      return NextResponse.json({ error: "Доступ отключён администратором." }, { status: 403 });
+    }
+    const res = NextResponse.json({ email: user.email, isAdmin: userIsAdmin(user) });
     res.cookies.set(sessionCookie(user.id));
     return res;
   } catch (e) {

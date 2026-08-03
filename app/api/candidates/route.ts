@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUserId } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
 import { generateWithWebSearch, hasApiKey, parseJsonLoose } from "@/lib/anthropic";
 import { CANDIDATES_SYSTEM, candidatesUser } from "@/lib/prompts";
 import { CandidatesResult } from "@/lib/types";
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-  if (!getSessionUserId()) {
+  if (!(await getSessionUser())) {
     return NextResponse.json({ error: "Не авторизован." }, { status: 401 });
   }
   let body: { context?: string };
