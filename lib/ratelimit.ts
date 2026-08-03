@@ -23,9 +23,19 @@ export function rateLimited(key: string, limit: number, windowMs: number): boole
   return e.count > limit;
 }
 
-// Достаёт IP клиента из заголовков прокси (Timeweb/Vercel ставят x-forwarded-for).
+// Достаёт IP клиента из заголовков прокси. ВАЖНО про спуфинг: атакующий может
+// сам прислать X-Forwarded-For, а доверенный прокси (nginx у Timeweb) допишет
+// реальный IP в КОНЕЦ цепочки. Поэтому:
+//  1) сначала доверяем x-real-ip (его ставит сам прокси, клиент не контролирует);
+//  2) иначе берём ПОСЛЕДНИЙ элемент XFF (добавленный доверенным хопом), а не
+//     первый (его мог подделать клиент).
 export function clientIp(req: Request): string {
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
   const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("x-real-ip") || "unknown";
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return "unknown";
 }
