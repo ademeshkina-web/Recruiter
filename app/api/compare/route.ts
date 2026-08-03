@@ -42,7 +42,12 @@ export async function POST(req: Request) {
   try {
     const result = await generateJson<CompareResult>(
       COMPARE_SYSTEM,
-      compareUser(body.brief, resumes),
+      compareUser(body.brief, resumes, {
+        mustHave: body.mustHave,
+        antiProfile: body.antiProfile,
+        roleFrame: body.roleFrame,
+        keyTasks: body.keyTasks,
+      }),
       COMPARE_SCHEMA,
       "high",
     );

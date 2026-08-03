@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const text = await generateWithWebSearch(CANDIDATES_SYSTEM, candidatesUser(context), 8);
+    const text = await generateWithWebSearch(CANDIDATES_SYSTEM, candidatesUser(context), 12);
     const result = parseJsonLoose<CandidatesResult>(text);
     return NextResponse.json(result);
   } catch (e) {

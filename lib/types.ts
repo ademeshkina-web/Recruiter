@@ -60,6 +60,8 @@ export interface Candidate {
   signal: string; // сигнал к переходу, если виден
   source: string; // ссылка/источник
   confidence: "высокая" | "средняя" | "гипотеза" | string;
+  angle?: string; // каким ходом сорсинга найден (донор, спикер, премия, telegram…)
+  outreach_hook?: string; // с чего зайти в аутрич именно к нему
 }
 
 export interface CandidatesResult {
@@ -71,12 +73,25 @@ export interface CandidatesResult {
 export interface CompareRequest {
   brief: string; // исходный бриф или сжатые требования
   resumes: { name?: string; text: string }[];
+  // Структурированный бриф из анализа (если позиция уже проанализирована) —
+  // даёт точный скоринг по извлечённым must-have и анти-профилю, а не по прозе.
+  mustHave?: string[];
+  antiProfile?: string[];
+  roleFrame?: string;
+  keyTasks?: string[];
 }
 
 export interface MustHaveCheck {
   requirement: string;
   status: "есть" | "частично" | "нет" | string;
   evidence: string;
+}
+
+// Проверка кандидата по стоп-фактору (анти-профилю).
+export interface AntiProfileFlag {
+  factor: string; // стоп-фактор из брифа
+  status: "чисто" | "риск" | "совпадает" | string;
+  evidence: string; // из резюме, или «в резюме не отражено»
 }
 
 export interface CandidateEvaluation {
@@ -86,6 +101,7 @@ export interface CandidateEvaluation {
   strengths: string[];
   gaps: string[];
   must_have_match: MustHaveCheck[];
+  anti_profile_flags?: AntiProfileFlag[]; // совпадения со стоп-факторами
   recommendation: string; // выводить / посмотреть / пропустить
 }
 
