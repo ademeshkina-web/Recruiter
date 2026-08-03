@@ -59,11 +59,12 @@ export default function Board({
     setLoading(true);
     setErr("");
     try {
-      const d = await postJson<Dossier>("/api/dossier", {
-        name: c.name,
-        role: c.role,
-        context: dossierContext,
-      });
+      // Досье — тяжёлая операция (до 12 веб-поисков); ждём дольше стандартного.
+      const d = await postJson<Dossier>(
+        "/api/dossier",
+        { name: c.name, role: c.role, context: dossierContext },
+        480_000,
+      );
       onUpdateCandidate(c.id, { dossier: d });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Ошибка");

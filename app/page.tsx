@@ -9,6 +9,7 @@ import { postJson } from "@/lib/client";
 import {
   AnalyzeResult,
   BoardCandidate,
+  Candidate,
   CandidatesResult,
   CompareResult,
   Position,
@@ -298,15 +299,41 @@ function Home({ store }: { store: Store }) {
 }
 
 function buildContext(a: AnalyzeResult): string {
+  const s = a.sourcing;
   return [
     `Роль: ${a.role_title}`,
     `Суть: ${a.headline}`,
     `Рамка роли: ${a.brief.role_frame}`,
     `Must-have: ${a.brief.must_have.join("; ")}`,
-    `Смежные пулы: ${a.sourcing.adjacent_pools.map((p) => p.name).join("; ")}`,
-    `Компании-доноры: ${a.sourcing.donor_companies.map((p) => p.name).join("; ")}`,
-    `Каналы: ${a.sourcing.channels.map((c) => `${c.name} (${c.type})`).join("; ")}`,
+    `Анти-профиль (НЕ тащить таких): ${a.brief.anti_profile.join("; ")}`,
+    `Смежные пулы: ${s.adjacent_pools.map((p) => `${p.name} — ${p.why}`).join(" | ")}`,
+    `Компании-доноры: ${s.donor_companies.map((p) => `${p.name} — ${p.why}`).join(" | ")}`,
+    `Сигналы-триггеры: ${s.trigger_signals.join("; ")}`,
+    `Каналы: ${s.channels.map((c) => `${c.name} (${c.type})`).join("; ")}`,
+    `Реферальные ходы: ${s.referral_moves.join("; ")}`,
+    `Boolean-строки (готовые запросы): ${s.boolean_strings.join(" || ")}`,
     `Условия: ${a.brief.conditions}`,
+    `Реализм рынка: ${a.market_reality}`,
+  ].join("\n");
+}
+
+// Читаемая сериализация структурированного брифа для поля сравнения резюме.
+function buildBriefText(a: AnalyzeResult): string {
+  const b = a.brief;
+  return [
+    `Роль: ${a.role_title}`,
+    `Рамка роли: ${b.role_frame}`,
+    ``,
+    `Must-have:`,
+    ...b.must_have.map((x) => `- ${x}`),
+    ``,
+    `Анти-профиль (стоп-факторы):`,
+    ...b.anti_profile.map((x) => `- ${x}`),
+    ``,
+    `Ключевые задачи (6–12 мес.):`,
+    ...b.key_tasks.map((x) => `- ${x}`),
+    ``,
+    `Условия: ${b.conditions}`,
   ].join("\n");
 }
 
@@ -322,13 +349,17 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function candidateNote(c: Candidate): string {
+  return c.relevance + (c.outreach_hook ? ` · Заход: ${c.outreach_hook}` : "");
+}
+
 function mapSourced(d: CandidatesResult): BoardCandidate[] {
   return d.candidates.map((c) => ({
     id: uid(),
     name: c.name,
     role: `${c.current_role}${c.company ? ", " + c.company : ""}`,
     source: c.source,
-    note: c.relevance,
+    note: candidateNote(c),
     stage: "longlist",
     addedFrom: "osint",
     createdAt: Date.now(),
@@ -352,9 +383,13 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
   }
 
   async function runCandidates(aData: AnalyzeResult) {
-    const d = await postJson<CandidatesResult>("/api/candidates", {
-      context: buildContext(aData),
-    });
+    // Поиск — самая тяжёлая операция (до 12 веб-поисков); ждём дольше, чтобы
+    // клиент не оборвал запрос, пока сервер ещё собирает кандидатов.
+    const d = await postJson<CandidatesResult>(
+      "/api/candidates",
+      { context: buildContext(aData) },
+      480_000,
+    );
     store.update(position.id, { sourced: d });
     store.addCandidates(position.id, mapSourced(d));
     return d;
@@ -558,7 +593,8 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
         )}
         {tab === "compare" && (
           <CompareView
-            defaultBrief={position.brief || SAMPLE_BRIEF}
+            analyze={a}
+            defaultBrief={a ? buildBriefText(a) : position.brief || SAMPLE_BRIEF}
             onboard={new Set(position.candidates.map((c) => c.name.toLowerCase()))}
             onAdd={(c) => store.addCandidates(position.id, [c])}
           />
@@ -941,12 +977,26 @@ function CandidatesView({
               <tbody>
                 {data.candidates.map((c, i) => (
                   <tr key={i} className="border-t border-ink/10 align-top">
-                    <td className="px-4 py-3 font-semibold text-ink">{c.name}</td>
+                    <td className="px-4 py-3 font-semibold text-ink">
+                      {c.name}
+                      {c.angle && (
+                        <span className="mt-1 block text-[11px] font-normal text-accent/80">
+                          ↳ {c.angle}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-ink/80">
                       {c.current_role}
                       {c.company ? `, ${c.company}` : ""}
                     </td>
-                    <td className="px-4 py-3 text-ink/80">{c.relevance}</td>
+                    <td className="px-4 py-3 text-ink/80">
+                      {c.relevance}
+                      {c.outreach_hook && (
+                        <span className="mt-1 block text-[11px] text-ink/50">
+                          Заход: {c.outreach_hook}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-ink/70">{c.signal || "—"}</td>
                     <td className="px-4 py-3">
                       <SafeLink
@@ -969,7 +1019,7 @@ function CandidatesView({
                             name: c.name,
                             role: `${c.current_role}${c.company ? ", " + c.company : ""}`,
                             source: c.source,
-                            note: c.relevance,
+                            note: candidateNote(c),
                             stage: "longlist",
                             addedFrom: "osint",
                             createdAt: Date.now(),
@@ -1005,10 +1055,12 @@ function ConfidenceBadge({ value }: { value: string }) {
 }
 
 function CompareView({
+  analyze,
   defaultBrief,
   onboard,
   onAdd,
 }: {
+  analyze: AnalyzeResult | null;
   defaultBrief: string;
   onboard: Set<string>;
   onAdd: (c: BoardCandidate) => void;
@@ -1063,9 +1115,18 @@ function CompareView({
     setLoading(true);
     setErr("");
     try {
+      // Структурированный (авторитетный) бриф шлём, ТОЛЬКО пока рекрутёр не
+      // тронул текстовое поле. Как только он его отредактировал — оцениваем по
+      // тому, что он видит (иначе был бы молчаливый рассинхрон: правит текст, а
+      // модель судит по исходному анализу).
+      const structuredActive = !!analyze && cbrief === defaultBrief;
       const d = await postJson<CompareResult>("/api/compare", {
         brief: cbrief,
         resumes: resumes.filter((r) => r.text.trim().length > 30),
+        mustHave: structuredActive ? analyze!.brief.must_have : undefined,
+        antiProfile: structuredActive ? analyze!.brief.anti_profile : undefined,
+        roleFrame: structuredActive ? analyze!.brief.role_frame : undefined,
+        keyTasks: structuredActive ? analyze!.brief.key_tasks : undefined,
       });
       setData(d);
     } catch (e) {
@@ -1084,6 +1145,13 @@ function CompareView({
           rows={4}
           className="w-full resize-y rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none focus:border-accent"
         />
+        {analyze && (
+          <p className="mt-2 text-xs text-ink/50">
+            {cbrief === defaultBrief
+              ? "Скоринг идёт строго по извлечённому брифу (must-have и анти-профиль из анализа)."
+              : "Бриф отредактирован — оценка пойдёт по этому тексту, а не по исходному анализу."}
+          </p>
+        )}
       </Card>
 
       <div className="space-y-3">
@@ -1203,6 +1271,23 @@ function CompareView({
                   ))}
                 </div>
               </div>
+              {c.anti_profile_flags && c.anti_profile_flags.length > 0 && (
+                <div className="mt-4">
+                  <div className="mb-2 text-xs font-semibold uppercase text-ink/40">
+                    Стоп-факторы (анти-профиль)
+                  </div>
+                  <div className="space-y-1.5">
+                    {c.anti_profile_flags.map((f, j) => (
+                      <div key={j} className="flex items-start gap-2 text-sm">
+                        <AntiFlagDot status={f.status} />
+                        <span className="text-ink/90">
+                          <span className="font-medium">{f.factor}</span> — {f.evidence}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mt-4 rounded-lg bg-paper px-3 py-2 text-sm">
                 <span className="font-semibold text-ink">Рекомендация: </span>
                 <span className="text-ink/80">{c.recommendation}</span>
@@ -1239,6 +1324,20 @@ function StatusDot({ status }: { status: string }) {
       ? "bg-amber-500"
       : s.includes("нет")
         ? "bg-red-500"
+        : "bg-ink/30";
+  return <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${color}`} title={status} />;
+}
+
+// Для стоп-факторов: «совпадает» — красный (отсекающий), «риск» — жёлтый,
+// «чисто» — зелёный.
+function AntiFlagDot({ status }: { status: string }) {
+  const s = (status || "").toLowerCase();
+  const color = s.includes("совпад")
+    ? "bg-red-500"
+    : s.includes("риск")
+      ? "bg-amber-500"
+      : s.includes("чист")
+        ? "bg-green-500"
         : "bg-ink/30";
   return <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${color}`} title={status} />;
 }

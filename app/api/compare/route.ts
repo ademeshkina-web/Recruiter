@@ -42,7 +42,13 @@ export async function POST(req: Request) {
   try {
     const result = await generateJson<CompareResult>(
       COMPARE_SYSTEM,
-      compareUser(body.brief, resumes),
+      compareUser(body.brief, resumes, {
+        // Защита от некорректного тела: только массивы строк / строка.
+        mustHave: Array.isArray(body.mustHave) ? body.mustHave : undefined,
+        antiProfile: Array.isArray(body.antiProfile) ? body.antiProfile : undefined,
+        roleFrame: typeof body.roleFrame === "string" ? body.roleFrame : undefined,
+        keyTasks: Array.isArray(body.keyTasks) ? body.keyTasks : undefined,
+      }),
       COMPARE_SCHEMA,
       "high",
     );
