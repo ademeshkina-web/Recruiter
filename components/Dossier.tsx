@@ -1,6 +1,7 @@
 "use client";
 
 import { Dossier } from "@/lib/types";
+import { SafeLink } from "@/components/SafeLink";
 
 export default function DossierModal({
   name,
@@ -105,14 +106,13 @@ export default function DossierModal({
                       {f.text}{" "}
                       <span className="text-ink/40">· {f.date || "дата ?"}</span>{" "}
                       {f.source && (
-                        <a
-                          href={f.source}
-                          target="_blank"
-                          rel="noreferrer"
+                        <SafeLink
+                          url={f.source}
+                          whenUnsafe={null}
                           className="text-accent underline underline-offset-2"
                         >
                           источник
-                        </a>
+                        </SafeLink>
                       )}
                     </li>
                   ))}
@@ -125,14 +125,12 @@ export default function DossierModal({
                 <ul className="space-y-1.5">
                   {dossier.links.map((l, i) => (
                     <li key={i} className="text-sm">
-                      <a
-                        href={l.url}
-                        target="_blank"
-                        rel="noreferrer"
+                      <SafeLink
+                        url={l.url}
                         className="text-accent underline underline-offset-2"
                       >
                         {l.label || l.url}
-                      </a>
+                      </SafeLink>
                     </li>
                   ))}
                 </ul>

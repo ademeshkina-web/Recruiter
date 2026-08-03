@@ -3,9 +3,12 @@ import { getSessionUserId } from "@/lib/auth";
 import mammoth from "mammoth";
 import { extractText, hasApiKey } from "@/lib/anthropic";
 import { EXTRACT_SYSTEM } from "@/lib/prompts";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// Не ниже таймаута SDK (240с), иначе на Vercel функция убивается раньше, чем
+// сработает дружелюбный таймаут, и пользователь получает платформенный 504.
+export const maxDuration = 300;
 
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const ALLOWED = new Set(["application/pdf", "text/plain", DOCX]);
@@ -16,9 +19,10 @@ export async function POST(req: Request) {
   }
   let body: { base64?: string; mediaType?: string; filename?: string };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    // Файл приходит base64 — крупнее прочих, но не безлимитно (~9 МБ файла).
+    body = await readJsonLimited(req, 12 * 1024 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
 
   const { base64, mediaType } = body;

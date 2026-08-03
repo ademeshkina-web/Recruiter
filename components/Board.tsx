@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { BoardCandidate, Dossier, OutreachResult, Position, Stage, STAGES } from "@/lib/types";
 import { uid } from "@/lib/store";
+import { postJson } from "@/lib/client";
+import { SafeLink } from "@/components/SafeLink";
 import DossierModal from "@/components/Dossier";
 import OutreachModal from "@/components/Outreach";
 
@@ -27,6 +29,10 @@ export default function Board({
   const [outId, setOutId] = useState<string | null>(null);
   const [outLoading, setOutLoading] = useState(false);
   const [outErr, setOutErr] = useState("");
+  // Защита от двойного клика: не запускать второй дорогой сбор досье/писем
+  // по тому же кандидату, пока первый не завершился.
+  const runningDossier = useRef<Set<string>>(new Set());
+  const runningOutreach = useRef<Set<string>>(new Set());
 
   const openCand = position.candidates.find((c) => c.id === openId) || null;
   const outCand = position.candidates.find((c) => c.id === outId) || null;
@@ -48,20 +54,21 @@ export default function Board({
   }
 
   async function runDossier(c: BoardCandidate) {
+    if (runningDossier.current.has(c.id)) return; // уже собирается
+    runningDossier.current.add(c.id);
     setLoading(true);
     setErr("");
     try {
-      const res = await fetch("/api/dossier", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: c.name, role: c.role, context: dossierContext }),
+      const d = await postJson<Dossier>("/api/dossier", {
+        name: c.name,
+        role: c.role,
+        context: dossierContext,
       });
-      const d = (await res.json()) as Dossier & { error?: string };
-      if (!res.ok) throw new Error(d.error || "Ошибка");
       onUpdateCandidate(c.id, { dossier: d });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Ошибка");
     } finally {
+      runningDossier.current.delete(c.id);
       setLoading(false);
     }
   }
@@ -73,23 +80,25 @@ export default function Board({
   }
 
   async function runOutreach(c: BoardCandidate) {
+    if (runningOutreach.current.has(c.id)) return; // уже генерируется
+    runningOutreach.current.add(c.id);
     setOutLoading(true);
     setOutErr("");
     try {
       const dossierSummary = c.dossier
         ? [c.dossier.recommendation, ...c.dossier.findings.map((f) => f.text)].join(" ")
         : c.note || "";
-      const res = await fetch("/api/outreach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: c.name, role: c.role, context: dossierContext, dossierSummary }),
+      const d = await postJson<OutreachResult>("/api/outreach", {
+        name: c.name,
+        role: c.role,
+        context: dossierContext,
+        dossierSummary,
       });
-      const d = (await res.json()) as OutreachResult & { error?: string };
-      if (!res.ok) throw new Error(d.error || "Ошибка");
       onUpdateCandidate(c.id, { outreach: d });
     } catch (e) {
       setOutErr(e instanceof Error ? e.message : "Ошибка");
     } finally {
+      runningOutreach.current.delete(c.id);
       setOutLoading(false);
     }
   }
@@ -251,14 +260,13 @@ function Card({
         </select>
         <div className="flex items-center gap-2">
           {c.source && (
-            <a
-              href={c.source}
-              target="_blank"
-              rel="noreferrer"
+            <SafeLink
+              url={c.source}
+              whenUnsafe={null}
               className="text-xs text-accent underline underline-offset-2"
             >
               источник
-            </a>
+            </SafeLink>
           )}
           <button
             onClick={onRemove}

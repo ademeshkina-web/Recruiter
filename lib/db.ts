@@ -7,6 +7,15 @@ export interface DBUser {
   password_hash: string;
 }
 
+// Бросается, когда e-mail уже занят. Роут регистрации ловит и отдаёт 409
+// (в т.ч. при гонке двух одновременных регистраций одного адреса).
+export class EmailTakenError extends Error {
+  constructor() {
+    super("EMAIL_TAKEN");
+    this.name = "EmailTakenError";
+  }
+}
+
 export interface Store {
   init(): Promise<void>;
   getUserByEmail(email: string): Promise<DBUser | null>;
@@ -39,6 +48,9 @@ class MemoryStore implements Store {
     return this.users.get(id) || null;
   }
   async createUser(email: string, passwordHash: string) {
+    // Проверка и вставка — синхронно, без await между ними, поэтому атомарны
+    // в одном потоке Node: параллельные регистрации не создадут дубль.
+    for (const u of this.users.values()) if (u.email === email) throw new EmailTakenError();
     const u: DBUser = { id: uid(), email, password_hash: passwordHash };
     this.users.set(u.id, u);
     this.positions.set(u.id, new Map());
@@ -108,10 +120,16 @@ class PgStore implements Store {
   }
   async createUser(email: string, passwordHash: string) {
     const id = uid();
-    await this.pool.query(
-      "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
-      [id, email, passwordHash],
-    );
+    try {
+      await this.pool.query(
+        "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
+        [id, email, passwordHash],
+      );
+    } catch (e) {
+      // 23505 = unique_violation по users.email (в т.ч. при гонке регистраций).
+      if ((e as { code?: string }).code === "23505") throw new EmailTakenError();
+      throw e;
+    }
     return { id, email, password_hash: passwordHash };
   }
   async listPositions(userId: string) {
@@ -140,6 +158,14 @@ const globalForStore = globalThis as unknown as { __recruiterStore?: Store };
 
 export function getStore(): Store {
   if (!globalForStore.__recruiterStore) {
+    // В проде in-memory запрещён: без БД данные тихо терялись бы при рестарте
+    // контейнера, а регистрации были бы не изолированы. Требуем DATABASE_URL.
+    if (process.env.NODE_ENV === "production" && !process.env.DATABASE_URL) {
+      throw new Error(
+        "DATABASE_URL не задан. В продакшене нужна PostgreSQL — задайте переменную " +
+          "окружения DATABASE_URL (иначе данные не сохраняются).",
+      );
+    }
     if (process.env.DATABASE_URL) {
       // Ленивая загрузка pg, чтобы in-memory режим не требовал драйвер.
 

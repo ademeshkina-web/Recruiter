@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getStore } from "@/lib/db";
 import { getSessionUserId } from "@/lib/auth";
 import { Position } from "@/lib/types";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,12 +25,14 @@ export async function PUT(req: Request) {
   if (!userId) return unauthorized();
   let body: { position?: Position };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    body = await readJsonLimited(req, 1024 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
   const p = body.position;
-  if (!p || !p.id) {
+  // id обязан быть непустой строкой: это первичный ключ, число/объект сломали бы
+  // предсказуемость upsert по (user_id, id) в PostgreSQL.
+  if (!p || typeof p.id !== "string" || !p.id.trim()) {
     return NextResponse.json({ error: "Нет данных позиции." }, { status: 400 });
   }
   const store = getStore();

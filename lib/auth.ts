@@ -4,17 +4,38 @@ import bcrypt from "bcryptjs";
 
 const COOKIE = "rec_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 дней
+const MIN_SECRET_LEN = 32;
 
+// В проде запасного секрета нет: если SESSION_SECRET не задан или слишком
+// короткий, приложение обязано падать, а не подписывать сессии предсказуемым
+// значением из исходников (иначе любой смог бы подделать чужую cookie).
 function secret(): string {
-  return process.env.SESSION_SECRET || "dev-insecure-secret-change-me";
+  const s = process.env.SESSION_SECRET;
+  if (s && s.length >= MIN_SECRET_LEN) return s;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET не задан или слишком короткий. Задайте переменную окружения " +
+        "SESSION_SECRET длиной от 32 символов (например: openssl rand -hex 32).",
+    );
+  }
+  // Только dev/test: удобство локального запуска, в прод не попадает.
+  return s || "dev-insecure-secret-change-me";
 }
 
 export async function hashPassword(pw: string): Promise<string> {
   return bcrypt.hash(pw, 10);
 }
 
-export async function verifyPassword(pw: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(pw, hash);
+// Фиктивный хеш для выравнивания времени ответа логина: сравниваем пароль даже
+// когда пользователя нет, чтобы по задержке нельзя было перечислять e-mail.
+const DUMMY_HASH = bcrypt.hashSync("timing-equalizer-not-a-real-password", 10);
+
+export async function verifyPasswordConstantTime(
+  pw: string,
+  hash: string | undefined,
+): Promise<boolean> {
+  const ok = await bcrypt.compare(pw, hash || DUMMY_HASH);
+  return Boolean(hash) && ok;
 }
 
 // Токен = base64url(userId).HMAC — самодостаточный, без хранения сессий.

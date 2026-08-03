@@ -4,6 +4,7 @@ import { generateJson, hasApiKey } from "@/lib/anthropic";
 import { COMPARE_SCHEMA, COMPARE_SYSTEM, compareUser } from "@/lib/prompts";
 import { CompareRequest, CompareResult } from "@/lib/types";
 import { SAMPLE_COMPARE } from "@/lib/sample";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -14,9 +15,10 @@ export async function POST(req: Request) {
   }
   let body: CompareRequest;
   try {
-    body = (await req.json()) as CompareRequest;
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    // Больше остальных: сравнение принимает пачку резюме текстом.
+    body = await readJsonLimited(req, 2 * 1024 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
 
   if (!body.brief || body.brief.trim().length < 20) {

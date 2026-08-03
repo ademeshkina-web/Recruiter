@@ -4,6 +4,7 @@ import { generateWithWebSearch, hasApiKey, parseJsonLoose } from "@/lib/anthropi
 import { CANDIDATES_SYSTEM, candidatesUser } from "@/lib/prompts";
 import { CandidatesResult } from "@/lib/types";
 import { SAMPLE_CANDIDATES } from "@/lib/sample";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -14,9 +15,9 @@ export async function POST(req: Request) {
   }
   let body: { context?: string };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    body = await readJsonLimited(req, 256 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
 
   const context = (body.context || "").trim();
