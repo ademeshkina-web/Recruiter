@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
+import { SafeLink } from "@/components/SafeLink";
+import { postJson } from "@/lib/client";
 import {
   AnalyzeResult,
   BoardCandidate,
@@ -336,13 +338,9 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
   }
 
   async function runCandidates(aData: AnalyzeResult) {
-    const res = await fetch("/api/candidates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ context: buildContext(aData) }),
+    const d = await postJson<CandidatesResult>("/api/candidates", {
+      context: buildContext(aData),
     });
-    const d = (await res.json()) as CandidatesResult & { error?: string };
-    if (!res.ok) throw new Error(d.error || "Ошибка поиска кандидатов");
     store.update(position.id, { sourced: d });
     store.addCandidates(position.id, mapSourced(d));
     return d;
@@ -354,13 +352,7 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
     setCandErr("");
     try {
       setPhase(1);
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief, company, role }),
-      });
-      const aData = (await res.json()) as AnalyzeResult & { error?: string };
-      if (!res.ok) throw new Error(aData.error || "Ошибка анализа");
+      const aData = await postJson<AnalyzeResult>("/api/analyze", { brief, company, role });
       store.update(position.id, {
         analyze: aData,
         brief,
@@ -943,18 +935,13 @@ function CandidatesView({
                     <td className="px-4 py-3 text-ink/80">{c.relevance}</td>
                     <td className="px-4 py-3 text-ink/70">{c.signal || "—"}</td>
                     <td className="px-4 py-3">
-                      {c.source ? (
-                        <a
-                          href={c.source}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-accent underline underline-offset-2"
-                        >
-                          ссылка
-                        </a>
-                      ) : (
-                        "—"
-                      )}
+                      <SafeLink
+                        url={c.source}
+                        whenUnsafe="—"
+                        className="text-accent underline underline-offset-2"
+                      >
+                        ссылка
+                      </SafeLink>
                     </td>
                     <td className="px-4 py-3">
                       <ConfidenceBadge value={c.confidence} />
@@ -1035,13 +1022,11 @@ function CompareView({
           ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           : "text/plain";
       const mediaType = file.type || byExt;
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ base64: b64, mediaType, filename: file.name }),
+      const d = await postJson<{ text?: string; note?: string }>("/api/extract", {
+        base64: b64,
+        mediaType,
+        filename: file.name,
       });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Ошибка загрузки");
       if (d.note) setErr(d.note);
       setResumes((r) =>
         r.map((x, idx) =>
@@ -1064,13 +1049,10 @@ function CompareView({
     setLoading(true);
     setErr("");
     try {
-      const res = await fetch("/api/compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: cbrief, resumes: resumes.filter((r) => r.text.trim().length > 30) }),
+      const d = await postJson<CompareResult>("/api/compare", {
+        brief: cbrief,
+        resumes: resumes.filter((r) => r.text.trim().length > 30),
       });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || "Ошибка");
       setData(d);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Ошибка");

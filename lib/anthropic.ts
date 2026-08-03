@@ -10,11 +10,41 @@ export function hasApiKey(): boolean {
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!client) {
+    // Таймаут и один ретрай вместо дефолтных SDK (до 10 минут ожидания):
+    // сервер не должен висеть на зависшем/отфильтрованном запросе к модели.
+    const opts = { timeout: 240_000, maxRetries: 1 };
     client = process.env.ANTHROPIC_API_KEY
-      ? new Anthropic()
-      : new Anthropic({ authToken: process.env.ANTHROPIC_AUTH_TOKEN });
+      ? new Anthropic(opts)
+      : new Anthropic({ ...opts, authToken: process.env.ANTHROPIC_AUTH_TOKEN });
   }
   return client;
+}
+
+/**
+ * Приводит ошибку вызова модели к понятному пользователю сообщению на русском.
+ * Главный случай — гео-блокировка Anthropic (403 «Request not allowed»), когда
+ * сервер размещён в неподдерживаемом регионе: раньше пользователь видел сырой
+ * английский JSON.
+ */
+export function mapModelError(e: unknown): Error {
+  const status = (e as { status?: number })?.status;
+  const msg = e instanceof Error ? e.message : String(e);
+  if (status === 403 || /request not allowed|permission_error|unsupported.?countr/i.test(msg)) {
+    return new Error(
+      "Модель Anthropic недоступна из региона, где размещён сервер (гео-блокировка). " +
+        "Разместите приложение или прокси в поддерживаемой стране.",
+    );
+  }
+  if (status === 401 || /authentication|invalid x-api-key/i.test(msg)) {
+    return new Error("Ключ Anthropic не принят — проверьте ANTHROPIC_API_KEY.");
+  }
+  if (status === 429 || status === 529 || /rate.?limit|overloaded/i.test(msg)) {
+    return new Error("Модель перегружена или превышен лимит — попробуйте через минуту.");
+  }
+  if (/timeout|aborted|ETIMEDOUT|ECONNRESET|ENOTFOUND|network/i.test(msg)) {
+    return new Error("Модель слишком долго не отвечает — попробуйте ещё раз.");
+  }
+  return e instanceof Error ? e : new Error(String(e));
 }
 
 type Effort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -48,9 +78,13 @@ export async function generateJson<T>(
     system,
     messages: [{ role: "user", content: user }],
   };
-  const stream = c.messages.stream(params as unknown as Anthropic.MessageStreamParams);
-
-  const message = await stream.finalMessage();
+  let message;
+  try {
+    const stream = c.messages.stream(params as unknown as Anthropic.MessageStreamParams);
+    message = await stream.finalMessage();
+  } catch (e) {
+    throw mapModelError(e);
+  }
 
   if (message.stop_reason === "refusal") {
     throw new Error("Модель отклонила запрос по соображениям безопасности.");
@@ -87,9 +121,14 @@ export async function generateWithWebSearch(
       tools,
       messages,
     };
-    const res = await c.messages.create(
-      params as unknown as Anthropic.MessageCreateParamsNonStreaming,
-    );
+    let res;
+    try {
+      res = await c.messages.create(
+        params as unknown as Anthropic.MessageCreateParamsNonStreaming,
+      );
+    } catch (e) {
+      throw mapModelError(e);
+    }
 
     if (res.stop_reason === "refusal") {
       throw new Error("Модель отклонила запрос по соображениям безопасности.");
@@ -131,9 +170,14 @@ export async function extractText(
       },
     ],
   };
-  const res = await c.messages.create(
-    params as unknown as Anthropic.MessageCreateParamsNonStreaming,
-  );
+  let res;
+  try {
+    res = await c.messages.create(
+      params as unknown as Anthropic.MessageCreateParamsNonStreaming,
+    );
+  } catch (e) {
+    throw mapModelError(e);
+  }
   if (res.stop_reason === "refusal") {
     throw new Error("Модель отклонила запрос.");
   }

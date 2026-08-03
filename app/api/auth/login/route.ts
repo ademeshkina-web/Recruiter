@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/lib/db";
-import { sessionCookie, verifyPassword } from "@/lib/auth";
+import { sessionCookie, verifyPasswordConstantTime } from "@/lib/auth";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,9 +9,9 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   let body: { email?: string; password?: string };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    body = await readJsonLimited(req, 8 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
 
   const email = (body.email || "").trim().toLowerCase();
@@ -20,7 +21,10 @@ export async function POST(req: Request) {
     const store = getStore();
     await store.init();
     const user = await store.getUserByEmail(email);
-    if (!user || !(await verifyPassword(password, user.password_hash))) {
+    // Сравнение выполняется всегда (даже без пользователя) — тайминг не выдаёт,
+    // зарегистрирован ли e-mail.
+    const ok = await verifyPasswordConstantTime(password, user?.password_hash);
+    if (!user || !ok) {
       return NextResponse.json({ error: "Неверный e-mail или пароль." }, { status: 401 });
     }
     const res = NextResponse.json({ email: user.email });

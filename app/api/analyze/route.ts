@@ -4,6 +4,7 @@ import { generateJson, hasApiKey } from "@/lib/anthropic";
 import { ANALYZE_SCHEMA, ANALYZE_SYSTEM, analyzeUser } from "@/lib/prompts";
 import { AnalyzeRequest, AnalyzeResult } from "@/lib/types";
 import { SAMPLE_ANALYZE } from "@/lib/sample";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -14,9 +15,9 @@ export async function POST(req: Request) {
   }
   let body: AnalyzeRequest;
   try {
-    body = (await req.json()) as AnalyzeRequest;
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    body = await readJsonLimited(req, 256 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
 
   if (!body.brief || body.brief.trim().length < 20) {

@@ -4,6 +4,7 @@ import { generateWithWebSearch, hasApiKey, parseJsonLoose } from "@/lib/anthropi
 import { DOSSIER_SYSTEM, dossierUser } from "@/lib/prompts";
 import { Dossier } from "@/lib/types";
 import { SAMPLE_DOSSIER } from "@/lib/sample";
+import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -14,9 +15,9 @@ export async function POST(req: Request) {
   }
   let body: { name?: string; role?: string; context?: string };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
+    body = await readJsonLimited(req, 256 * 1024);
+  } catch (e) {
+    return badBodyResponse(e);
   }
 
   const name = (body.name || "").trim();
