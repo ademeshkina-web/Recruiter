@@ -41,8 +41,11 @@ export function mapModelError(e: unknown): Error {
   if (status === 429 || status === 529 || /rate.?limit|overloaded/i.test(msg)) {
     return new Error("Модель перегружена или превышен лимит — попробуйте через минуту.");
   }
-  if (/timeout|aborted|ETIMEDOUT|ECONNRESET|ENOTFOUND|network/i.test(msg)) {
-    return new Error("Модель слишком долго не отвечает — попробуйте ещё раз.");
+  if (
+    e instanceof Anthropic.APIConnectionError ||
+    /timeout|timed out|aborted|connection error|ETIMEDOUT|ECONNRESET|ENOTFOUND|network/i.test(msg)
+  ) {
+    return new Error("Модель слишком долго не отвечает или нет связи — попробуйте ещё раз.");
   }
   return e instanceof Error ? e : new Error(String(e));
 }

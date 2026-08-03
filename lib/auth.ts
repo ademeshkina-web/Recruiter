@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 
 const COOKIE = "rec_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 дней
-const MIN_SECRET_LEN = 16;
+const MIN_SECRET_LEN = 32;
 
 // В проде запасного секрета нет: если SESSION_SECRET не задан или слишком
 // короткий, приложение обязано падать, а не подписывать сессии предсказуемым
@@ -24,10 +24,6 @@ function secret(): string {
 
 export async function hashPassword(pw: string): Promise<string> {
   return bcrypt.hash(pw, 10);
-}
-
-export async function verifyPassword(pw: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(pw, hash);
 }
 
 // Фиктивный хеш для выравнивания времени ответа логина: сравниваем пароль даже

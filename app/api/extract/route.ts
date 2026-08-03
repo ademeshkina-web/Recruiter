@@ -6,7 +6,9 @@ import { EXTRACT_SYSTEM } from "@/lib/prompts";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// Не ниже таймаута SDK (240с), иначе на Vercel функция убивается раньше, чем
+// сработает дружелюбный таймаут, и пользователь получает платформенный 504.
+export const maxDuration = 300;
 
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const ALLOWED = new Set(["application/pdf", "text/plain", DOCX]);

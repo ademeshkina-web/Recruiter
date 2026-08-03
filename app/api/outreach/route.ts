@@ -7,7 +7,8 @@ import { SAMPLE_OUTREACH } from "@/lib/sample";
 import { badBodyResponse, readJsonLimited } from "@/lib/http";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// Не ниже таймаута SDK (240с) — см. пояснение в extract/route.ts.
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   if (!getSessionUserId()) {
