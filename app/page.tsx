@@ -1204,10 +1204,17 @@ function CompareView({
         </button>
         <button
           onClick={run}
-          disabled={loading}
+          // Пока идёт извлечение текста из файла, резюме ещё пустое: без этой
+          // блокировки клик уходил на сервер с пустым списком и возвращал
+          // «добавьте резюме текстом», хотя файл уже загружался.
+          disabled={loading || uploadingIdx !== null}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
         >
-          {loading ? "Сравниваю…" : "Сравнить с брифом"}
+          {loading
+            ? "Сравниваю…"
+            : uploadingIdx !== null
+              ? "Читаю файл…"
+              : "Сравнить с брифом"}
         </button>
         {err && <span className="text-sm text-red-600">{err}</span>}
       </div>

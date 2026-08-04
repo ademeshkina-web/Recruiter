@@ -179,10 +179,10 @@ export const OUTREACH_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
+    // Количество задаётся в тексте промпта, а не схемой: structured outputs
+    // Anthropic принимают minItems только 0 или 1, на 2+ запрос падает с 400.
     motivation_hypotheses: {
       type: "array",
-      minItems: 2,
-      maxItems: 4,
       items: {
         type: "object",
         additionalProperties: false,
@@ -197,8 +197,6 @@ export const OUTREACH_SCHEMA = {
     },
     messages: {
       type: "array",
-      minItems: 3,
-      maxItems: 3,
       items: {
         type: "object",
         additionalProperties: false,

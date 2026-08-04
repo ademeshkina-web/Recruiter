@@ -30,7 +30,11 @@ export async function POST(req: Request) {
   const resumes = (body.resumes || []).filter((r) => r && r.text && r.text.trim().length > 30);
   if (resumes.length === 0) {
     return NextResponse.json(
-      { error: "Добавьте хотя бы одно резюме (текстом)." },
+      {
+        error:
+          "Нет ни одного резюме с текстом. Загрузите файл (PDF/DOCX/TXT) и дождитесь, " +
+          "пока он прочитается, либо вставьте текст резюме вручную.",
+      },
       { status: 400 },
     );
   }
