@@ -6,9 +6,23 @@ export interface DBUser {
   id: string;
   email: string;
   password_hash: string;
+  /** Профиль рекрутёра: заполняет он сам, нужен чтобы выбирать коллегу по имени. */
+  full_name: string;
+  job_title: string;
+  telegram: string; // @username, как в Telegram; задаётся самим человеком
   is_admin: boolean;
   disabled: boolean;
   created_at: number; // ms epoch
+}
+
+/** Коллега для выпадающего списка: без пароля и служебных полей. */
+export interface Recruiter {
+  id: string;
+  email: string;
+  fullName: string;
+  jobTitle: string;
+  telegram: string;
+  isMe: boolean;
 }
 
 // Активность рекрутёра — считается из его позиций (JSONB), без отдельных полей.
@@ -108,6 +122,8 @@ export interface Store {
   createUser(email: string, passwordHash: string): Promise<DBUser>;
   listPositions(userId: string): Promise<Position[]>;
   listTeamPositions(viewerId: string): Promise<TeamPosition[]>;
+  listRecruiters(viewerId: string): Promise<Recruiter[]>;
+  updateProfile(userId: string, p: { fullName: string; jobTitle: string; telegram: string }): Promise<void>;
   upsertPosition(userId: string, position: Position): Promise<void>;
   deletePosition(userId: string, id: string): Promise<void>;
   // --- админ ---
@@ -166,6 +182,9 @@ class MemoryStore implements Store {
       id: uid(),
       email,
       password_hash: passwordHash,
+      full_name: "",
+      job_title: "",
+      telegram: "",
       is_admin: false,
       disabled: false,
       created_at: Date.now(),
@@ -187,6 +206,26 @@ class MemoryStore implements Store {
       for (const p of m.values()) out.push(toTeamPosition(p, u.email, uid2 === viewerId));
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+  async listRecruiters(viewerId: string) {
+    return Array.from(this.users.values())
+      .filter((u) => !u.disabled)
+      .map((u) => ({
+        id: u.id,
+        email: u.email,
+        fullName: u.full_name || "",
+        jobTitle: u.job_title || "",
+        telegram: u.telegram || "",
+        isMe: u.id === viewerId,
+      }))
+      .sort((a, b) => (a.fullName || a.email).localeCompare(b.fullName || b.email, "ru"));
+  }
+  async updateProfile(userId: string, p: { fullName: string; jobTitle: string; telegram: string }) {
+    const u = this.users.get(userId);
+    if (!u) return;
+    u.full_name = p.fullName;
+    u.job_title = p.jobTitle;
+    u.telegram = p.telegram;
   }
   async upsertPosition(userId: string, position: Position) {
     if (!this.positions.has(userId)) this.positions.set(userId, new Map());
@@ -288,6 +327,11 @@ class PgStore implements Store {
         await this.q(
           `ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;`,
         );
+        // Профиль рекрутёра: чтобы коллегу можно было выбрать по имени,
+        // а не по почте.
+        await this.q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT;`);
+        await this.q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title TEXT;`);
+        await this.q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram TEXT;`);
         await this.q(`
           CREATE TABLE IF NOT EXISTS positions (
             id TEXT NOT NULL,
@@ -307,6 +351,9 @@ class PgStore implements Store {
       id: row.id as string,
       email: row.email as string,
       password_hash: row.password_hash as string,
+      full_name: (row.full_name as string) || "",
+      job_title: (row.job_title as string) || "",
+      telegram: (row.telegram as string) || "",
       is_admin: Boolean(row.is_admin),
       disabled: Boolean(row.disabled),
       created_at: row.created_at ? new Date(row.created_at as string).getTime() : 0,
@@ -315,14 +362,14 @@ class PgStore implements Store {
 
   async getUserByEmail(email: string) {
     const r = await this.q(
-      "SELECT id, email, password_hash, is_admin, disabled, created_at FROM users WHERE email = $1",
+      "SELECT id, email, password_hash, full_name, is_admin, disabled, created_at FROM users WHERE email = $1",
       [email],
     );
     return r.rows[0] ? this.mapUser(r.rows[0]) : null;
   }
   async getUserById(id: string) {
     const r = await this.q(
-      "SELECT id, email, password_hash, is_admin, disabled, created_at FROM users WHERE id = $1",
+      "SELECT id, email, password_hash, full_name, is_admin, disabled, created_at FROM users WHERE id = $1",
       [id],
     );
     return r.rows[0] ? this.mapUser(r.rows[0]) : null;
@@ -343,6 +390,9 @@ class PgStore implements Store {
       id,
       email,
       password_hash: passwordHash,
+      full_name: "",
+      job_title: "",
+      telegram: "",
       is_admin: false,
       disabled: false,
       created_at: Date.now(),
@@ -355,6 +405,29 @@ class PgStore implements Store {
     );
     return r.rows.map((row) => row.data as Position);
   }
+  async listRecruiters(viewerId: string) {
+    const r = await this.q(
+      `SELECT id, email, full_name, job_title, telegram FROM users
+        WHERE disabled = false
+        ORDER BY COALESCE(NULLIF(full_name, ''), email)`,
+    );
+    return r.rows.map((u) => ({
+      id: u.id as string,
+      email: u.email as string,
+      fullName: (u.full_name as string) || "",
+      jobTitle: (u.job_title as string) || "",
+      telegram: (u.telegram as string) || "",
+      isMe: u.id === viewerId,
+    }));
+  }
+
+  async updateProfile(userId: string, p: { fullName: string; jobTitle: string; telegram: string }) {
+    await this.q(
+      "UPDATE users SET full_name = $2, job_title = $3, telegram = $4 WHERE id = $1",
+      [userId, p.fullName, p.jobTitle, p.telegram],
+    );
+  }
+
   async listTeamPositions(viewerId: string) {
     // Витрина команды: берём позиции всех рекрутёров вместе с владельцем.
     // Кандидаты не отдаются наружу — из data считаются только счётчики.

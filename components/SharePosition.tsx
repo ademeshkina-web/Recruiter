@@ -1,7 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { postJson } from "@/lib/client";
+
+interface Recruiter {
+  id: string;
+  email: string;
+  fullName: string;
+  jobTitle: string;
+  isMe: boolean;
+}
 
 /**
  * Передача копии позиции коллеге. Копия, а не общий доступ: коллега получает
@@ -22,6 +30,19 @@ export default function SharePosition({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [people, setPeople] = useState<Recruiter[] | null>(null);
+
+  useEffect(() => {
+    if (!open || people) return;
+    let alive = true;
+    fetch("/api/recruiters")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => alive && setPeople((d.recruiters || []).filter((p: Recruiter) => !p.isMe)))
+      .catch(() => alive && setPeople([]));
+    return () => {
+      alive = false;
+    };
+  }, [open, people]);
 
   async function send() {
     if (!email.trim() || busy) return;
@@ -70,14 +91,28 @@ export default function SharePosition({
         продолжит в своём кабинете, не запуская поиск заново.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="e-mail рекрутёра"
-          type="email"
-          className="min-w-[240px] flex-1 rounded-lg border border-ink/15 px-3 py-1.5 text-sm outline-none focus:border-accent"
-        />
+        {people === null ? (
+          <span className="text-sm text-ink/45">Загружаю коллег…</span>
+        ) : people.length > 0 ? (
+          <select
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="min-w-[280px] flex-1 rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-sm outline-none focus:border-accent"
+          >
+            <option value="">— выберите рекрутёра —</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.email}>
+                {p.fullName || p.email}
+                {p.jobTitle ? ` · ${p.jobTitle}` : ""}
+                {p.fullName ? ` (${p.email})` : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="text-sm text-ink/50">
+            Кроме вас в системе пока никого нет — пусть коллега зарегистрируется по ссылке и коду приглашения.
+          </span>
+        )}
         <button
           onClick={send}
           disabled={busy || !email.trim()}
@@ -86,6 +121,11 @@ export default function SharePosition({
           {busy ? "Передаю…" : "Передать"}
         </button>
       </div>
+      {people && people.some((p) => !p.fullName) && (
+        <p className="mt-2 text-xs text-ink/45">
+          Часть коллег видна по почте — они ещё не заполнили ФИО в профиле.
+        </p>
+      )}
       {msg && <p className="mt-2 text-xs text-green-700">{msg}</p>}
       {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
       <p className="mt-2 text-xs text-ink/45">

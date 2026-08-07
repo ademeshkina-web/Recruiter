@@ -6,6 +6,7 @@ import Board from "@/components/Board";
 import RunProgress from "@/components/RunProgress";
 import TeamPositions from "@/components/TeamPositions";
 import SharePosition from "@/components/SharePosition";
+import ProfileEditor from "@/components/ProfileEditor";
 import { SafeLink } from "@/components/SafeLink";
 import AdminScreen from "@/components/Admin";
 import { postJson } from "@/lib/client";
@@ -55,6 +56,7 @@ export default function Page() {
   }, []);
 
   const store = usePositions(Boolean(auth));
+  const [showProfile, setShowProfile] = useState(false);
 
   async function logout() {
     try {
@@ -95,6 +97,13 @@ export default function Page() {
             )}
             {auth && (
               <>
+                <button
+                  onClick={() => setShowProfile(true)}
+                  className="pressable rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 transition-colors hover:bg-paper"
+                  title="ФИО, должность, Telegram"
+                >
+                  Профиль
+                </button>
                 <span className="hidden text-xs text-ink/50 sm:inline">{auth.email}</span>
                 <button
                   onClick={logout}
@@ -107,6 +116,10 @@ export default function Page() {
           </div>
         </div>
       </header>
+
+      {showProfile && auth && (
+        <ProfileEditor email={auth.email} onClose={() => setShowProfile(false)} />
+      )}
 
       <div className="mx-auto max-w-6xl px-5 py-8">
         {auth === undefined ? (
