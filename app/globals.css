@@ -4,6 +4,7 @@
 
 :root {
   color-scheme: light;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 html,
@@ -33,4 +34,92 @@ input {
 
 ::selection {
   background: #e8dfd4;
+}
+
+@layer base {
+  /* Видимый фокус только с клавиатуры: мышью рамка не мешает, а таб-навигация
+     без неё превращается в угадайку. */
+  :focus-visible {
+    outline: 2px solid #c8552b;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* Нажатие должно чувствоваться: элемент чуть проседает под пальцем.
+     Анимируем только transform — он не вызывает пересчёт раскладки. */
+  .pressable {
+    transition: transform 160ms var(--ease-out);
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Подъём карточки при наведении. Только для мыши: на тач-устройствах
+     :hover срабатывает по тапу и залипает. */
+  .card-hover {
+    transition:
+      transform 180ms var(--ease-out),
+      box-shadow 180ms var(--ease-out);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .card-hover:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        0 4px 12px rgba(20, 24, 31, 0.1),
+        0 2px 4px rgba(20, 24, 31, 0.06);
+    }
+  }
+
+  /* Появление списков каскадом. Задержки короткие: длинные ощущаются как
+     тормоза, а не как изящество. */
+  .stagger > * {
+    animation: fade-up 260ms var(--ease-out) both;
+  }
+  .stagger > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .stagger > *:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .stagger > *:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .stagger > *:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .stagger > *:nth-child(n + 5) {
+    animation-delay: 160ms;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Уменьшенная анимация — не «выключить всё», а убрать движение и оставить
+   мягкое проявление: оно помогает понять, что на экране появилось новое. */
+@media (prefers-reduced-motion: reduce) {
+  .pressable:active:not(:disabled),
+  .card-hover:hover {
+    transform: none;
+  }
+  .stagger > * {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

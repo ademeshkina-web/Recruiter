@@ -195,7 +195,7 @@ function AuthScreen({ onAuthed }: { onAuthed: (a: Auth) => void }) {
           <button
             onClick={submit}
             disabled={loading || !email || password.length < 6}
-            className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+            className="pressable w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
           >
             {loading ? "…" : mode === "login" ? "Войти" : "Зарегистрироваться"}
           </button>
@@ -250,7 +250,7 @@ function Home({ store }: { store: Store }) {
         <h2 className="text-lg font-semibold text-ink">Позиции</h2>
         <button
           onClick={() => store.create()}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          className="pressable rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
         >
           + Добавить новую позицию
         </button>
@@ -477,7 +477,7 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
             <button
               onClick={runAll}
               disabled={phase > 0 || brief.trim().length < 20}
-              className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+              className="pressable rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
             >
               {phase > 0 ? "Формирую…" : "Сформировать стратегию и найти кандидатов"}
             </button>
@@ -1208,7 +1208,7 @@ function CompareView({
           // блокировки клик уходил на сервер с пустым списком и возвращал
           // «добавьте резюме текстом», хотя файл уже загружался.
           disabled={loading || uploadingIdx !== null}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+          className="pressable rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
         >
           {loading
             ? "Сравниваю…"

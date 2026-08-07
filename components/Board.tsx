@@ -121,33 +121,55 @@ export default function Board({
       />
 
       {position.candidates.length === 0 ? (
-        <p className="mt-6 text-sm text-ink/50">
-          Доска пуста. Добавляйте кандидатов кнопкой «+ на доску» на вкладках
-          «Кандидаты» и «Сравнение резюме» — или вручную выше.
-        </p>
+        <div className="mt-6 rounded-xl border border-dashed border-ink/15 bg-white/50 p-8 text-center">
+          <div className="text-2xl">🗂</div>
+          <p className="mt-2 text-sm font-semibold text-ink">Доска пуста</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-ink/55">
+            Кандидаты попадают сюда кнопкой «+ на доску» на вкладках «Кандидаты» и
+            «Сравнение резюме». Или добавьте вручную полем выше.
+          </p>
+        </div>
       ) : (
         <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-5">
           {STAGES.map((st) => {
             const cards = position.candidates.filter((c) => c.stage === st.id);
+            const s = STAGE_STYLE[st.id];
             return (
-              <div key={st.id} className="rounded-xl border border-ink/10 bg-paper/60 p-2">
-                <div className="mb-2 flex items-center justify-between px-1 py-1">
-                  <span className="text-sm font-semibold text-ink">{st.label}</span>
-                  <span className="rounded-full bg-ink/10 px-2 text-xs text-ink/60">
-                    {cards.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {cards.map((c) => (
-                    <Card
-                      key={c.id}
-                      c={c}
-                      onUpdate={(patch) => onUpdateCandidate(c.id, patch)}
-                      onRemove={() => onRemoveCandidate(c.id)}
-                      onDossier={() => openDossier(c)}
-                      onOutreach={() => openOutreach(c)}
-                    />
-                  ))}
+              <div
+                key={st.id}
+                className={`overflow-hidden rounded-xl border ${s.border} ${s.bg}`}
+              >
+                {/* Цветная полоса сверху: этап читается боковым зрением,
+                    не приходится вчитываться в заголовок каждой колонки. */}
+                <div className={`h-1 w-full ${s.bar}`} />
+                <div className="p-2">
+                  <div className="mb-2 flex items-center justify-between px-1 py-1">
+                    <span className={`text-sm font-semibold ${s.text}`}>{st.label}</span>
+                    <span
+                      className={`rounded-full px-2 text-xs font-semibold tabular-nums ${
+                        cards.length ? s.pill : "bg-ink/8 text-ink/40"
+                      }`}
+                    >
+                      {cards.length}
+                    </span>
+                  </div>
+                  <div className="stagger space-y-2">
+                    {cards.map((c) => (
+                      <Card
+                        key={c.id}
+                        c={c}
+                        onUpdate={(patch) => onUpdateCandidate(c.id, patch)}
+                        onRemove={() => onRemoveCandidate(c.id)}
+                        onDossier={() => openDossier(c)}
+                        onOutreach={() => openOutreach(c)}
+                      />
+                    ))}
+                    {cards.length === 0 && (
+                      <div className="rounded-lg border border-dashed border-ink/10 px-2 py-4 text-center text-xs text-ink/35">
+                        пусто
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -185,6 +207,41 @@ export default function Board({
     </div>
   );
 }
+
+/**
+ * Цвета этапов. Классы перечислены целиком, а не собраны из кусков строк:
+ * Tailwind вырезает всё, чего не видит в исходнике, и динамическое
+ * `bg-stage-${id}` молча не доедет до сборки.
+ */
+const STAGE_STYLE: Record<Stage, {
+  bar: string; bg: string; border: string; text: string; pill: string; edge: string;
+}> = {
+  longlist: {
+    bar: "bg-stage-longlist", bg: "bg-stage-longlist/5", border: "border-stage-longlist/20",
+    text: "text-stage-longlist", pill: "bg-stage-longlist/15 text-stage-longlist",
+    edge: "border-l-stage-longlist",
+  },
+  outreach: {
+    bar: "bg-stage-outreach", bg: "bg-stage-outreach/5", border: "border-stage-outreach/20",
+    text: "text-stage-outreach", pill: "bg-stage-outreach/15 text-stage-outreach",
+    edge: "border-l-stage-outreach",
+  },
+  interview: {
+    bar: "bg-stage-interview", bg: "bg-stage-interview/5", border: "border-stage-interview/20",
+    text: "text-stage-interview", pill: "bg-stage-interview/15 text-stage-interview",
+    edge: "border-l-stage-interview",
+  },
+  final: {
+    bar: "bg-stage-final", bg: "bg-stage-final/5", border: "border-stage-final/20",
+    text: "text-stage-final", pill: "bg-stage-final/15 text-stage-final",
+    edge: "border-l-stage-final",
+  },
+  rejected: {
+    bar: "bg-stage-rejected", bg: "bg-stage-rejected/5", border: "border-stage-rejected/20",
+    text: "text-stage-rejected", pill: "bg-stage-rejected/15 text-stage-rejected",
+    edge: "border-l-stage-rejected",
+  },
+};
 
 interface PotokJob {
   id: number;
@@ -304,7 +361,7 @@ function PotokPanel({
         <button
           onClick={() => send(pending)}
           disabled={busy || pending.length === 0}
-          className="rounded-lg bg-accent px-3 py-1.5 text-sm text-white transition hover:opacity-90 disabled:opacity-40"
+          className="pressable rounded-lg bg-accent px-3 py-1.5 text-sm text-white transition hover:opacity-90 disabled:opacity-40"
         >
           {busy ? "Выгружаю…" : `Выгрузить в Поток (${pending.length})`}
         </button>
@@ -396,25 +453,45 @@ function Card({
   onDossier: () => void;
   onOutreach: () => void;
 }) {
+  // Балл соответствия — цветом, а не только цифрой: 34 карточки глазами
+  // не отсортируешь, а красное/зелёное считывается мгновенно.
+  const scoreCls =
+    typeof c.score !== "number"
+      ? ""
+      : c.score >= 75
+        ? "bg-green-100 text-green-800"
+        : c.score >= 50
+          ? "bg-amber-100 text-amber-800"
+          : "bg-red-100 text-red-700";
+
   return (
-    <div className="rounded-lg border border-ink/10 bg-white p-3 shadow-sm">
+    <div
+      className={`card-hover rounded-lg border border-l-[3px] border-ink/10 bg-white p-3 shadow-card ${
+        STAGE_STYLE[c.stage]?.edge || ""
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
-        <div className="text-sm font-semibold text-ink">{c.name}</div>
+        <div className="text-sm font-semibold leading-snug text-ink">{c.name}</div>
         <div className="flex shrink-0 items-center gap-1">
           {c.potokId && (
             <SafeLink
               url={`https://app.potok.io/applicants/${c.potokId}`}
-              className="rounded bg-green-100 px-1.5 text-xs text-green-700"
+              className="rounded bg-green-100 px-1.5 text-xs font-medium text-green-700"
             >
               Поток ✓
             </SafeLink>
           )}
           {typeof c.score === "number" && (
-            <span className="rounded bg-accentsoft px-1.5 text-xs text-ink/70">{c.score}</span>
+            <span
+              className={`rounded px-1.5 text-xs font-semibold tabular-nums ${scoreCls}`}
+              title="Соответствие брифу"
+            >
+              {c.score}
+            </span>
           )}
         </div>
       </div>
-      {c.role && <div className="mt-0.5 text-xs text-ink/60">{c.role}</div>}
+      {c.role && <div className="mt-0.5 text-xs leading-snug text-ink/60">{c.role}</div>}
       <input
         defaultValue={c.note}
         onBlur={(e) => e.target.value !== c.note && onUpdate({ note: e.target.value })}
@@ -454,7 +531,7 @@ function Card({
       </div>
       <button
         onClick={onDossier}
-        className={`mt-2 w-full rounded-md border px-2 py-1 text-xs transition ${
+        className={`pressable mt-2 w-full rounded-md border px-2 py-1 text-xs transition-colors ${
           c.dossier
             ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
             : "border-ink/15 text-ink/60 hover:bg-paper"
@@ -464,7 +541,7 @@ function Card({
       </button>
       <button
         onClick={onOutreach}
-        className={`mt-1.5 w-full rounded-md border px-2 py-1 text-xs transition ${
+        className={`pressable mt-1.5 w-full rounded-md border px-2 py-1 text-xs transition-colors ${
           c.outreach
             ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
             : "border-ink/15 text-ink/60 hover:bg-paper"
