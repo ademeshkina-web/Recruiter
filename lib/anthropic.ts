@@ -23,7 +23,7 @@ export const EFFORT: Effort = (process.env.ANTHROPIC_EFFORT as Effort) || "mediu
  * Каждый поиск — это и плата за сам запрос, и объёмные результаты,
  * которые дальше оплачиваются как входные токены на каждой итерации.
  */
-export const WEB_SEARCH_MAX_USES = Number(process.env.WEB_SEARCH_MAX_USES || 12);
+export const WEB_SEARCH_MAX_USES = Number(process.env.WEB_SEARCH_MAX_USES || 16);
 
 /** Досье глубже лонг-листа, поэтому поисков больше — но тоже с потолком. */
 export const DOSSIER_SEARCH_MAX_USES = Number(process.env.DOSSIER_SEARCH_MAX_USES || 8);
