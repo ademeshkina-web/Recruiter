@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
+import RunProgress from "@/components/RunProgress";
 import { SafeLink } from "@/components/SafeLink";
 import AdminScreen from "@/components/Admin";
 import { postJson } from "@/lib/client";
@@ -497,7 +498,7 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
             </button>
           </div>
           {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
-          {phase > 0 && <Stepper phase={phase} />}
+          {phase > 0 && <RunProgress phase={phase} />}
         </div>
       </div>
     );
@@ -553,7 +554,7 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
           Демо-режим: пример без обращения к модели. Добавьте ANTHROPIC_API_KEY для реальных брифов.
         </div>
       )}
-      {phase > 0 && <Stepper phase={phase} />}
+      {phase > 0 && <RunProgress phase={phase} />}
 
       <div className="flex flex-wrap gap-1 border-b border-ink/10">
         {TABS.map((t) => (
@@ -609,41 +610,6 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
           />
         )}
       </div>
-    </div>
-  );
-}
-
-function Stepper({ phase }: { phase: number }) {
-  const steps = [
-    { n: 1, label: "Вакансия, сильный бриф и стратегия" },
-    { n: 2, label: "Кандидаты из открытых источников" },
-  ];
-  return (
-    <div className="my-4 rounded-lg border border-ink/10 bg-white p-4">
-      <ul className="space-y-2">
-        {steps.map((s) => {
-          const status = phase > s.n ? "done" : phase === s.n ? "active" : "pending";
-          return (
-            <li key={s.n} className="flex items-center gap-3 text-sm">
-              <span
-                className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
-                  status === "done"
-                    ? "bg-green-500 text-white"
-                    : status === "active"
-                      ? "bg-accent text-white"
-                      : "bg-ink/10 text-ink/40"
-                }`}
-              >
-                {status === "done" ? "✓" : status === "active" ? "•" : s.n}
-              </span>
-              <span className={status === "pending" ? "text-ink/40" : "text-ink/80"}>
-                {s.label}
-                {status === "active" && " …"}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }

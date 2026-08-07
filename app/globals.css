@@ -94,6 +94,19 @@ input {
   }
 }
 
+/* Полоса «идёт работа»: ходит слева направо, не изображая проценты. */
+.run-bar {
+  animation: run-bar 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes run-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;
