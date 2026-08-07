@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
 import RunProgress from "@/components/RunProgress";
+import TeamPositions from "@/components/TeamPositions";
 import { SafeLink } from "@/components/SafeLink";
 import AdminScreen from "@/components/Admin";
 import { postJson } from "@/lib/client";
@@ -295,6 +296,8 @@ function Home({ store }: { store: Store }) {
           ))}
         </div>
       )}
+
+      <TeamPositions />
     </div>
   );
 }

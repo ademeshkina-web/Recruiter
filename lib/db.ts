@@ -56,12 +56,58 @@ export const DB_UNAVAILABLE_TEXT =
   "База данных сейчас недоступна — связь с ней временно потеряна. " +
   "Данные целы, попробуйте через минуту.";
 
+/**
+ * Позиция коллеги в общей витрине. НАМЕРЕННО без кандидатов: видно, кто чем
+ * занят и не дублируется ли поиск, но досье, заметки и персональные данные
+ * кандидатов не покидают аккаунт владельца.
+ */
+export interface TeamPosition {
+  id: string;
+  title: string;
+  company: string;
+  role: string;
+  owner: string; // e-mail рекрутёра
+  isMine: boolean;
+  candidates: number;
+  byStage: Record<Stage, number>;
+  dossiers: number;
+  outreach: number;
+  hasStrategy: boolean;
+  updatedAt: number;
+}
+
+function toTeamPosition(p: Position, owner: string, isMine: boolean): TeamPosition {
+  const byStage = Object.fromEntries(STAGES.map((s) => [s.id, 0])) as Record<Stage, number>;
+  let dossiers = 0;
+  let outreach = 0;
+  for (const c of p.candidates || []) {
+    if (c.stage && byStage[c.stage] !== undefined) byStage[c.stage]++;
+    if (c.dossier) dossiers++;
+    if (c.outreach) outreach++;
+  }
+  return {
+    id: p.id,
+    title: p.title || p.analyze?.role_title || "Без названия",
+    company: p.company || "",
+    role: p.role || "",
+    owner,
+    isMine,
+    candidates: (p.candidates || []).length,
+    byStage,
+    dossiers,
+    outreach,
+    hasStrategy: Boolean(p.analyze),
+    updatedAt: p.updatedAt,
+  };
+}
+
 export interface Store {
   init(): Promise<void>;
   getUserByEmail(email: string): Promise<DBUser | null>;
   getUserById(id: string): Promise<DBUser | null>;
   createUser(email: string, passwordHash: string): Promise<DBUser>;
   listPositions(userId: string): Promise<Position[]>;
+  listTeamPositions(viewerId: string): Promise<TeamPosition[]>;
   upsertPosition(userId: string, position: Position): Promise<void>;
   deletePosition(userId: string, id: string): Promise<void>;
   // --- админ ---
@@ -132,6 +178,15 @@ class MemoryStore implements Store {
     const m = this.positions.get(userId);
     if (!m) return [];
     return Array.from(m.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+  async listTeamPositions(viewerId: string) {
+    const out: TeamPosition[] = [];
+    for (const [uid2, m] of this.positions) {
+      const u = this.users.get(uid2);
+      if (!u) continue;
+      for (const p of m.values()) out.push(toTeamPosition(p, u.email, uid2 === viewerId));
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
   async upsertPosition(userId: string, position: Position) {
     if (!this.positions.has(userId)) this.positions.set(userId, new Map());
@@ -299,6 +354,20 @@ class PgStore implements Store {
       [userId],
     );
     return r.rows.map((row) => row.data as Position);
+  }
+  async listTeamPositions(viewerId: string) {
+    // Витрина команды: берём позиции всех рекрутёров вместе с владельцем.
+    // Кандидаты не отдаются наружу — из data считаются только счётчики.
+    const r = await this.q(
+      `SELECT p.data, p.user_id, u.email
+         FROM positions p JOIN users u ON u.id = p.user_id
+        WHERE u.disabled = false
+        ORDER BY p.updated_at DESC
+        LIMIT 300`,
+    );
+    return r.rows.map((row) =>
+      toTeamPosition(row.data as Position, row.email as string, row.user_id === viewerId),
+    );
   }
   async upsertPosition(userId: string, position: Position) {
     await this.q(
