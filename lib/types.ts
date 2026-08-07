@@ -62,6 +62,8 @@ export interface Candidate {
   confidence: "высокая" | "средняя" | "гипотеза" | string;
   angle?: string; // каким ходом сорсинга найден (донор, спикер, премия, telegram…)
   outreach_hook?: string; // с чего зайти в аутрич именно к нему
+  fit_score?: number; // 0–100: соответствие must-have и анти-профилю из брифа
+  fit_reason?: string; // чем обоснован балл — что совпало и чего не хватает
 }
 
 export interface CandidatesResult {

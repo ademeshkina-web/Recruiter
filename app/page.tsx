@@ -5,6 +5,7 @@ import Markdown from "@/components/Markdown";
 import Board from "@/components/Board";
 import RunProgress from "@/components/RunProgress";
 import TeamPositions from "@/components/TeamPositions";
+import SharePosition from "@/components/SharePosition";
 import { SafeLink } from "@/components/SafeLink";
 import AdminScreen from "@/components/Admin";
 import { postJson } from "@/lib/client";
@@ -365,6 +366,9 @@ function mapSourced(d: CandidatesResult): BoardCandidate[] {
     source: c.source,
     note: candidateNote(c),
     stage: "longlist",
+    // Балл из поиска переносим на доску: карточки сразу окрашены по
+    // соответствию, и лонг-лист из 17 человек читается за секунду.
+    score: typeof c.fit_score === "number" ? c.fit_score : undefined,
     addedFrom: "osint",
     createdAt: Date.now(),
   }));
@@ -529,6 +533,12 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
           >
             {phase > 0 ? "Пересобираю…" : "Пересобрать"}
           </button>
+          <span className="mx-1 h-5 w-px bg-ink/10" />
+          <SharePosition
+            positionId={position.id}
+            title={a.role_title || position.title}
+            candidates={position.candidates.length}
+          />
           <span className="mx-1 h-5 w-px bg-ink/10" />
           <button
             onClick={() => exportDocx(position)}
@@ -930,6 +940,7 @@ function CandidatesView({
 
       {data && (
         <div className="space-y-4">
+          <FitSummary candidates={data.candidates} />
           <div className="overflow-x-auto rounded-xl border border-ink/10 bg-white shadow-sm">
             <table className="w-full text-left text-sm">
               <thead className="bg-paper text-xs uppercase text-ink/50">
@@ -946,13 +957,21 @@ function CandidatesView({
               <tbody>
                 {data.candidates.map((c, i) => (
                   <tr key={i} className="border-t border-ink/10 align-top">
-                    <td className="px-4 py-3 font-semibold text-ink">
-                      {c.name}
-                      {c.angle && (
-                        <span className="mt-1 block text-[11px] font-normal text-accent/80">
-                          ↳ {c.angle}
-                        </span>
-                      )}
+                    <td className="px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <FitBadge score={c.fit_score} />
+                        <div>
+                          <div className="font-semibold text-ink">{c.name}</div>
+                          {c.angle && (
+                            <span className="mt-1 block text-[11px] font-normal text-accent/80">
+                              ↳ {c.angle}
+                            </span>
+                          )}
+                          {c.fit_reason && (
+                            <span className="mt-1 block text-[11px] text-ink/50">{c.fit_reason}</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-ink/80">
                       {c.current_role}
@@ -990,6 +1009,7 @@ function CandidatesView({
                             source: c.source,
                             note: candidateNote(c),
                             stage: "longlist",
+                            score: typeof c.fit_score === "number" ? c.fit_score : undefined,
                             addedFrom: "osint",
                             createdAt: Date.now(),
                           })
@@ -1010,6 +1030,73 @@ function CandidatesView({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Сводка по качеству лонг-листа. Главное число — сколько кандидатов набрали 60+:
+ * именно они стоят аутрича, остальное — материал для проверки.
+ */
+function FitSummary({ candidates }: { candidates: Candidate[] }) {
+  const scored = candidates.filter((c) => typeof c.fit_score === "number");
+  if (scored.length === 0) return null;
+  const strong = scored.filter((c) => (c.fit_score as number) >= 80).length;
+  const good = scored.filter((c) => (c.fit_score as number) >= 60 && (c.fit_score as number) < 80).length;
+  const maybe = scored.filter((c) => (c.fit_score as number) >= 40 && (c.fit_score as number) < 60).length;
+  const weak = scored.length - strong - good - maybe;
+  const target = strong + good;
+
+  return (
+    <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-card">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="text-2xl font-bold tabular-nums text-ink">{target}</span>
+        <span className="text-sm text-ink/70">
+          {target === 1 ? "кандидат" : "кандидатов"} с соответствием <b>60+</b>
+        </span>
+        <span className="text-sm text-ink/40">из {candidates.length} найденных</span>
+      </div>
+      <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-ink/5">
+        {[
+          { n: strong, cls: "bg-green-500" },
+          { n: good, cls: "bg-lime-500" },
+          { n: maybe, cls: "bg-amber-400" },
+          { n: weak, cls: "bg-red-400" },
+        ].map((s, i) =>
+          s.n ? (
+            <div key={i} className={s.cls} style={{ width: `${(s.n / scored.length) * 100}%` }} />
+          ) : null,
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink/55">
+        <span>80+ сильные: {strong}</span>
+        <span>60–79 рабочие: {good}</span>
+        <span>40–59 проверить: {maybe}</span>
+        <span>ниже 40: {weak}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Балл соответствия брифу. 60 — порог, ниже которого кандидат не стоит аутрича. */
+function FitBadge({ score }: { score?: number }) {
+  if (typeof score !== "number") {
+    return <span className="mt-0.5 w-9 shrink-0 text-center text-xs text-ink/25">—</span>;
+  }
+  const cls =
+    score >= 80
+      ? "bg-green-100 text-green-800"
+      : score >= 60
+        ? "bg-lime-100 text-lime-800"
+        : score >= 40
+          ? "bg-amber-100 text-amber-800"
+          : "bg-red-100 text-red-700";
+  return (
+    <span
+      className={`mt-0.5 w-9 shrink-0 rounded px-1.5 py-0.5 text-center text-xs font-bold tabular-nums ${cls}`}
+      title="Соответствие must-have и анти-профилю из брифа"
+    >
+      {score}
+    </span>
   );
 }
 
