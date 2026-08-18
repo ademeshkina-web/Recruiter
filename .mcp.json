@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "omd_read": {
+      "type": "http",
+      "url": "https://omd-mcp-ro.eastmining.ru/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OMD_MCP_TOKEN}",
+        "X-OES-Keycloak-Id": "${OMD_MCP_KEYCLOAK_ID}"
+      }
+    }
+  }
+}

@@ -139,6 +139,32 @@ docker run -p 3000:3000 \
 (для БД подойдёт любой managed PostgreSQL — Neon, Supabase, Timeweb).
 `vercel.json` поднимает лимит функций до 300 сек (план Pro).
 
+## MCP-сервер ОМД (omd_read)
+
+`.mcp.json` подключает к Claude Code HTTP-сервер `omd_read`
+(`https://omd-mcp-ro.eastmining.ru/mcp`, доступ только на чтение). Секреты в
+репозитории не хранятся — заголовки собираются из переменных окружения:
+
+```bash
+export OMD_MCP_TOKEN=<токен>
+export OMD_MCP_KEYCLOAK_ID=<keycloak id>
+claude
+```
+
+При первом запуске Claude Code спросит подтверждение на подключение сервера из
+`.mcp.json`. Список инструментов — команда `/mcp`.
+
+Если держать токен в окружении неудобно, добавьте сервер только себе, минуя
+репозиторий:
+
+```bash
+claude mcp add --scope local --transport http omd_read https://omd-mcp-ro.eastmining.ru/mcp \
+  --header "Authorization: Bearer <токен>" \
+  --header "X-OES-Keycloak-Id: <keycloak id>"
+```
+
+Конфиг такого сервера лежит в `~/.claude.json` и в git не попадает.
+
 ## Этика OSINT
 
 Поиск кандидатов использует только **публичную профессиональную** информацию и
