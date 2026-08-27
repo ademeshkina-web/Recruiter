@@ -296,7 +296,7 @@ function Home({ store }: { store: Store }) {
                 <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink/50">
                   <span>{p.analyze ? "стратегия готова" : "черновик"}</span>
                   <span>· {p.candidates.length} на доске</span>
-                  <span>· {p.confidential === false ? "👁 видна команде" : "🔒 конфиденциальная"}</span>
+                  <span>· {p.confidential ? "🔒 конфиденциальная" : "👁 видна команде"}</span>
                 </div>
               </button>
               <button

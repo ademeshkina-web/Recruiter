@@ -204,7 +204,9 @@ class MemoryStore implements Store {
       const u = this.users.get(uid2);
       if (!u) continue;
       for (const p of m.values()) {
-        if (p.confidential) continue; // конфиденциальные скрыты из витрины
+        // Строго === true (как SQL `IS DISTINCT FROM 'true'` в PgStore): чтобы обе
+        // реализации совпадали на нестандартных значениях.
+        if (p.confidential === true) continue; // конфиденциальные скрыты из витрины
         out.push(toTeamPosition(p, u.email, uid2 === viewerId));
       }
     }
