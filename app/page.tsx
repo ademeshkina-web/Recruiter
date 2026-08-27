@@ -293,9 +293,10 @@ function Home({ store }: { store: Store }) {
                   {p.company || "без компании"} ·{" "}
                   {new Date(p.updatedAt).toLocaleDateString("ru-RU")}
                 </div>
-                <div className="mt-3 flex gap-3 text-xs text-ink/50">
+                <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink/50">
                   <span>{p.analyze ? "стратегия готова" : "черновик"}</span>
                   <span>· {p.candidates.length} на доске</span>
+                  <span>· {p.confidential === false ? "👁 видна команде" : "🔒 конфиденциальная"}</span>
                 </div>
               </button>
               <button
@@ -545,6 +546,22 @@ function Workspace({ store, position }: { store: Store; position: Position }) {
             className="rounded-lg border border-ink/15 px-3 py-1.5 text-sm text-ink/70 hover:bg-paper disabled:opacity-40"
           >
             {phase > 0 ? "Пересобираю…" : "Пересобрать"}
+          </button>
+          <span className="mx-1 h-5 w-px bg-ink/10" />
+          <button
+            onClick={() => store.update(position.id, { confidential: !position.confidential })}
+            title={
+              position.confidential
+                ? "Скрыта из витрины команды. Нажмите, чтобы показать команде."
+                : "Видна команде в витрине (только название и воронка, без кандидатов). Нажмите, чтобы скрыть."
+            }
+            className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+              position.confidential
+                ? "border-ink/15 text-ink/70 hover:bg-paper"
+                : "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+            }`}
+          >
+            {position.confidential ? "🔒 Конфиденциальная" : "👁 Видна команде"}
           </button>
           <span className="mx-1 h-5 w-px bg-ink/10" />
           <SharePosition

@@ -211,6 +211,9 @@ export interface Position {
   analyze: AnalyzeResult | null;
   sourced: CandidatesResult | null; // найденные по открытым источникам
   candidates: BoardCandidate[];
+  // Конфиденциальная позиция скрыта из витрины команды (её видит только владелец).
+  // По умолчанию true у новых позиций; владелец может открыть команде.
+  confidential?: boolean;
   createdAt: number;
   updatedAt: number;
 }
