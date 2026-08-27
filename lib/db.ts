@@ -203,7 +203,12 @@ class MemoryStore implements Store {
     for (const [uid2, m] of this.positions) {
       const u = this.users.get(uid2);
       if (!u) continue;
-      for (const p of m.values()) out.push(toTeamPosition(p, u.email, uid2 === viewerId));
+      for (const p of m.values()) {
+        // Строго === true (как SQL `IS DISTINCT FROM 'true'` в PgStore): чтобы обе
+        // реализации совпадали на нестандартных значениях.
+        if (p.confidential === true) continue; // конфиденциальные скрыты из витрины
+        out.push(toTeamPosition(p, u.email, uid2 === viewerId));
+      }
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -435,6 +440,7 @@ class PgStore implements Store {
       `SELECT p.data, p.user_id, u.email
          FROM positions p JOIN users u ON u.id = p.user_id
         WHERE u.disabled = false
+          AND (p.data->>'confidential') IS DISTINCT FROM 'true'
         ORDER BY p.updated_at DESC
         LIMIT 300`,
     );

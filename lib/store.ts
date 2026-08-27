@@ -23,6 +23,7 @@ export function newPosition(title = "Новая позиция"): Position {
     analyze: null,
     sourced: null,
     candidates: [],
+    confidential: true, // по умолчанию скрыта из витрины команды
     createdAt: now,
     updatedAt: now,
   };
