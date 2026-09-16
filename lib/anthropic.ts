@@ -64,6 +64,12 @@ export function mapModelError(e: unknown): Error {
   if (status === 401 || /authentication|invalid x-api-key/i.test(msg)) {
     return new Error("Ключ Anthropic не принят — проверьте ANTHROPIC_API_KEY.");
   }
+  if (status === 402 || /credit balance is too low|insufficient|billing|quota/i.test(msg)) {
+    return new Error(
+      "Закончились средства на балансе Anthropic API — пополните баланс в console.anthropic.com " +
+        "(Plans & Billing). Пока баланс нулевой, генерация недоступна.",
+    );
+  }
   if (status === 429 || status === 529 || /rate.?limit|overloaded/i.test(msg)) {
     return new Error("Модель перегружена или превышен лимит — попробуйте через минуту.");
   }
