@@ -11,6 +11,7 @@ import { CandidatesResult } from "@/lib/types";
 import { SAMPLE_CANDIDATES } from "@/lib/sample";
 import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 import { sourcingTools } from "@/lib/sourcingTools";
+import { normalizeCandidates } from "@/lib/normalize";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -51,6 +52,6 @@ export async function POST(req: Request) {
       undefined,
       sources,
     );
-    return parseJsonLoose<CandidatesResult>(text);
+    return normalizeCandidates(parseJsonLoose<CandidatesResult>(text));
   });
 }

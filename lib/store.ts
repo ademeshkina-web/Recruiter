@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BoardCandidate, Position } from "./types";
+import { normalizePosition } from "./normalize";
 
 // Серверное хранилище позиций (per-user). Загружается по /api/positions,
 // изменения пишутся на сервер (PUT/DELETE). Локальное состояние обновляется
@@ -73,7 +74,7 @@ export function usePositions(authed: boolean) {
       .then((r) => (r.ok ? r.json() : { positions: [] }))
       .then((d) => {
         if (cancelled) return;
-        setLocal(d.positions || []);
+        setLocal((Array.isArray(d.positions) ? d.positions : []).map(normalizePosition));
         setReady(true);
       })
       .catch(() => {
