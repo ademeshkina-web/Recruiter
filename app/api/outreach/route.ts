@@ -4,7 +4,7 @@ import { generateJson, hasApiKey, LIGHT_MODEL } from "@/lib/anthropic";
 import { OUTREACH_SCHEMA, OUTREACH_SYSTEM, outreachUser } from "@/lib/prompts";
 import { OutreachResult } from "@/lib/types";
 import { SAMPLE_OUTREACH } from "@/lib/sample";
-import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 
 export const runtime = "nodejs";
 // Не ниже таймаута SDK (240с) — см. пояснение в extract/route.ts.
@@ -30,8 +30,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ...SAMPLE_OUTREACH, demo: true });
   }
 
-  try {
-    const result = await generateJson<OutreachResult>(
+  return streamJson(() =>
+    generateJson<OutreachResult>(
       OUTREACH_SYSTEM,
       outreachUser(name, body.role || "", body.context || "", body.dossierSummary || ""),
       OUTREACH_SCHEMA,
@@ -40,10 +40,6 @@ export async function POST(req: Request) {
       "low",
       "outreach",
       LIGHT_MODEL,
-    );
-    return NextResponse.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Ошибка генерации писем.";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+    ),
+  );
 }

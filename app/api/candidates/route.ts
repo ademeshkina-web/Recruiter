@@ -9,7 +9,7 @@ import {
 import { CANDIDATES_SYSTEM, candidatesUser } from "@/lib/prompts";
 import { CandidatesResult } from "@/lib/types";
 import { SAMPLE_CANDIDATES } from "@/lib/sample";
-import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 import { sourcingTools } from "@/lib/sourcingTools";
 
 export const runtime = "nodejs";
@@ -38,7 +38,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ...SAMPLE_CANDIDATES, demo: true });
   }
 
-  try {
+  // Самая долгая операция (веб-поиск + источники) — стримим «пульс» против
+  // таймаута прокси, чтобы соединение не оборвалось за ~60с.
+  return streamJson(async () => {
     // LinkedIn и Telegram по API — если заданы ключи; иначе только веб-поиск.
     const sources = sourcingTools();
     const text = await generateWithWebSearch(
@@ -49,10 +51,6 @@ export async function POST(req: Request) {
       undefined,
       sources,
     );
-    const result = parseJsonLoose<CandidatesResult>(text);
-    return NextResponse.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Ошибка поиска кандидатов.";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+    return parseJsonLoose<CandidatesResult>(text);
+  });
 }

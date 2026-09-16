@@ -4,7 +4,7 @@ import { EFFORT, generateJson, hasApiKey, LIGHT_MODEL } from "@/lib/anthropic";
 import { COMPARE_SCHEMA, COMPARE_SYSTEM, compareUser } from "@/lib/prompts";
 import { CompareRequest, CompareResult } from "@/lib/types";
 import { SAMPLE_COMPARE } from "@/lib/sample";
-import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ...SAMPLE_COMPARE, demo: true });
   }
 
-  try {
+  return streamJson(async () => {
     const result = await generateJson<CompareResult>(
       COMPARE_SYSTEM,
       compareUser(body.brief, resumes, {
@@ -59,9 +59,6 @@ export async function POST(req: Request) {
       LIGHT_MODEL,
     );
     result.ranking.sort((a, b) => b.score - a.score);
-    return NextResponse.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Ошибка сравнения.";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+    return result;
+  });
 }
