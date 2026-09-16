@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { addUsage, logUsage, RawUsage } from "./usage";
+import type { ClientTool, ToolRunner } from "./sourcingTools";
 
 export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
 
@@ -155,17 +156,23 @@ export async function generateWithWebSearch(
   maxUses = WEB_SEARCH_MAX_USES,
   label = "webSearch",
   effort: Effort = EFFORT,
+  extra?: { tools: ClientTool[]; run: ToolRunner },
 ): Promise<string> {
   const c = getClient();
   const started = Date.now();
-  const tools = [{ type: "web_search_20260209", name: "web_search", max_uses: maxUses }];
+  const tools = [
+    { type: "web_search_20260209", name: "web_search", max_uses: maxUses },
+    ...(extra?.tools || []),
+  ];
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: user }];
 
   let lastText = "";
   let total: RawUsage = {};
 
-  for (let i = 0; i < 6; i++) {
+  // Свои инструменты (LinkedIn, Telegram) добавляют ходов туда-обратно.
+  const maxTurns = extra?.tools.length ? 20 : 6;
+  for (let i = 0; i < maxTurns; i++) {
     const params = {
       model: MODEL,
       max_tokens: 16000,
@@ -192,6 +199,20 @@ export async function generateWithWebSearch(
     if (res.stop_reason === "pause_turn") {
       messages.push({ role: "assistant", content: markLastForCache(res.content) });
       continue; // сервер продолжит инструментальный цикл
+    }
+
+    if (res.stop_reason === "tool_use" && extra) {
+      const uses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+      const results = await Promise.all(
+        uses.map(async (u) => ({
+          type: "tool_result" as const,
+          tool_use_id: u.id,
+          content: await extra.run(u.name, (u.input || {}) as Record<string, unknown>),
+        })),
+      );
+      messages.push({ role: "assistant", content: markLastForCache(res.content) });
+      messages.push({ role: "user", content: results });
+      continue;
     }
     break;
   }

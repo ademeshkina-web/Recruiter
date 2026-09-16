@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { hasApiKey, MODEL } from "@/lib/anthropic";
 import { usingDatabase } from "@/lib/db";
 import { hasPotok } from "@/lib/potok";
+import { hasLinkedIn } from "@/lib/linkedin";
+import { hasTgstat } from "@/lib/tgstat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,5 +15,7 @@ export async function GET() {
     model: MODEL,
     db: usingDatabase(),
     potok: hasPotok(),
+    linkedin: hasLinkedIn(),
+    telegram: hasTgstat(),
   });
 }
