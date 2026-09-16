@@ -43,30 +43,50 @@ export function badBodyResponse(e: unknown): NextResponse {
  */
 export function streamJson(work: () => Promise<unknown>): Response {
   const encoder = new TextEncoder();
+  let finished = false;
+  let beat: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    finished = true;
+    if (beat) clearInterval(beat);
+  };
   const stream = new ReadableStream({
     async start(controller) {
-      let finished = false;
-      const beat = setInterval(() => {
-        if (!finished) {
-          try {
-            controller.enqueue(encoder.encode(" "));
-          } catch {
-            /* поток закрыт */
-          }
+      // Любая запись в уже закрытый/отменённый поток безопасна — не роняем процесс.
+      const push = (s: string) => {
+        if (finished) return;
+        try {
+          controller.enqueue(encoder.encode(s));
+        } catch {
+          /* поток закрыт/отменён */
         }
-      }, 15000);
+      };
+      beat = setInterval(() => push(" "), 15000);
       try {
         const result = await work();
-        controller.enqueue(encoder.encode(JSON.stringify(result)));
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(result)));
+        } catch {
+          /* клиент отвалился до финала */
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Ошибка генерации.";
-        controller.enqueue(encoder.encode(JSON.stringify({ error: msg })));
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify({ error: msg })));
+        } catch {
+          /* клиент отвалился */
+        }
       } finally {
-        finished = true;
-        clearInterval(beat);
-        controller.close();
+        stop();
+        try {
+          controller.close();
+        } catch {
+          /* уже закрыт */
+        }
       }
     },
+    // Клиент отвалился (закрыл вкладку / сработал таймаут): гасим «пульс».
+    // Сам вызов модели продолжится в фоне — его отмена вынесена отдельно.
+    cancel: stop,
   });
   return new Response(stream, {
     headers: {
