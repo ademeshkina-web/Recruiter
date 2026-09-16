@@ -4,7 +4,7 @@ import { EFFORT, generateJson, hasApiKey } from "@/lib/anthropic";
 import { ANALYZE_SCHEMA, ANALYZE_SYSTEM, analyzeUser } from "@/lib/prompts";
 import { AnalyzeRequest, AnalyzeResult } from "@/lib/types";
 import { SAMPLE_ANALYZE } from "@/lib/sample";
-import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -31,17 +31,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ...SAMPLE_ANALYZE, demo: true });
   }
 
-  try {
-    const result = await generateJson<AnalyzeResult>(
+  // Долгая операция — стримим «пульс», чтобы прокси не оборвал соединение.
+  return streamJson(() =>
+    generateJson<AnalyzeResult>(
       ANALYZE_SYSTEM,
       analyzeUser(body.brief, body.company, body.role),
       ANALYZE_SCHEMA,
       EFFORT,
       "analyze",
-    );
-    return NextResponse.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Ошибка генерации.";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+    ),
+  );
 }

@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import mammoth from "mammoth";
 import { extractText, hasApiKey } from "@/lib/anthropic";
 import { EXTRACT_SYSTEM } from "@/lib/prompts";
-import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 
 export const runtime = "nodejs";
 // Не ниже таймаута SDK (240с), иначе на Vercel функция убивается раньше, чем
@@ -73,11 +73,8 @@ export async function POST(req: Request) {
     });
   }
 
-  try {
+  return streamJson(async () => {
     const text = await extractText(EXTRACT_SYSTEM, base64, mediaType);
-    return NextResponse.json({ text });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Ошибка извлечения текста.";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+    return { text };
+  });
 }

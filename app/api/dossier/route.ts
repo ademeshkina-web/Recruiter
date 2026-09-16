@@ -9,7 +9,7 @@ import {
 import { DOSSIER_SYSTEM, dossierUser } from "@/lib/prompts";
 import { Dossier } from "@/lib/types";
 import { SAMPLE_DOSSIER } from "@/lib/sample";
-import { badBodyResponse, readJsonLimited } from "@/lib/http";
+import { badBodyResponse, readJsonLimited, streamJson } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -34,17 +34,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ...SAMPLE_DOSSIER, demo: true });
   }
 
-  try {
+  return streamJson(async () => {
     const text = await generateWithWebSearch(
       DOSSIER_SYSTEM,
       dossierUser(name, body.role || "", body.context || ""),
       DOSSIER_SEARCH_MAX_USES,
       "dossier",
     );
-    const result = parseJsonLoose<Dossier>(text);
-    return NextResponse.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Ошибка сбора досье.";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+    return parseJsonLoose<Dossier>(text);
+  });
 }
